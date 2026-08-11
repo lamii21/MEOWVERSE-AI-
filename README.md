@@ -134,9 +134,36 @@ measurement, with a correspondingly restrained visual treatment per
 tier: plain → tinted → shimmer → glow → aura → particles). Hover for a
 subtle 3D tilt on desktop; tap on mobile.
 
-Card actions are all real, not stubs: **Save** bookmarks it locally,
-**Share** marks it public and copies a `/cat/[id]` link (or opens your
+Card actions are all real, not stubs: **Save** persists it to your
+account's collection, **Favorite** and **Share** work the same way
+(Share marks it public and copies a `/cat/[id]` link, or opens your
 device's native share sheet where available), **Download PNG** exports
 the actual card as an image file, and **Story** jumps to story
 generation. **Generate Wallpaper** is an honest placeholder — disabled
 with a "coming soon" label — pending Phase 13's image generation.
+
+## Accounts & your cat collection
+
+You can explore MeowVerse as a guest — upload a photo, get a full
+analysis and story, view the result — with no account required.
+Creating an account is only needed to keep what you find: clicking
+**Save** as a guest shows a prompt to register or log in, after which
+that cat (and everything you save from then on) belongs to your
+account.
+
+- **Register** at `/register`, **log in** at `/login` — email +
+  password, hashed with `bcrypt` (never stored in plaintext, never
+  logged).
+- Sessions are **httpOnly cookies** backed by a database-stored,
+  revocable token (not a JWT) — logging out immediately invalidates
+  the session server-side. See ARCHITECTURE.md §11 for the full
+  security rationale.
+- **`/collection`** — your full gallery: filter by favorites or
+  rarity, search by name or breed, sort by newest/oldest/rarity/name.
+- **`/profile`** — your stats (cats discovered, favorite breed, most
+  common color, legendary cats, stories written) and achievements,
+  all computed from your real saved cats — never fabricated.
+- A saved cat is **private by default**; only clicking **Share**
+  makes that specific cat viewable at a public `/cat/[id]` link, and
+  only its intended public fields are ever exposed there — never your
+  email or account details.

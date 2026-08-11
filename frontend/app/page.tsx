@@ -5,13 +5,11 @@ import { Faq } from "@/features/landing/components/Faq";
 import { Footer } from "@/features/landing/components/Footer";
 import { Hero } from "@/features/landing/components/Hero";
 import { HowItWorks } from "@/features/landing/components/HowItWorks";
-import { Navbar } from "@/features/landing/components/Navbar";
 import { TechStack } from "@/features/landing/components/TechStack";
 
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col">
-      <Navbar />
       <main className="flex-1">
         <Hero />
         <HowItWorks />

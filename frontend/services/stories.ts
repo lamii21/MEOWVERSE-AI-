@@ -1,6 +1,12 @@
 import type { StoryResponse, StoryStyle } from "@/types/story";
 
-export type StoryApiErrorKind = "validation" | "not_found" | "rate_limited" | "server" | "network";
+export type StoryApiErrorKind =
+  | "validation"
+  | "not_found"
+  | "unauthorized"
+  | "rate_limited"
+  | "server"
+  | "network";
 
 export class StoryApiError extends Error {
   kind: StoryApiErrorKind;
@@ -16,13 +22,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(`${API_URL}${path}`, init);
+    return await fetch(`${API_URL}${path}`, { credentials: "include", ...init });
   } catch {
     throw new StoryApiError("The Cat Universe is taking a nap. Try again soon.", "network");
   }
 }
 
 function throwForStatus(response: Response, notFoundMessage: string): never | void {
+  if (response.status === 401) {
+    throw new StoryApiError("Please sign in to do that.", "unauthorized");
+  }
   if (response.status === 404) {
     throw new StoryApiError(notFoundMessage, "not_found");
   }
@@ -68,6 +77,12 @@ export async function fetchPublicStory(storyId: string): Promise<StoryResponse> 
 
 export async function shareStory(storyId: string): Promise<StoryResponse> {
   const response = await request(`/api/v1/stories/${storyId}/share`, { method: "POST" });
+  throwForStatus(response, "This story couldn't be found.");
+  return response.json();
+}
+
+export async function unshareStory(storyId: string): Promise<StoryResponse> {
+  const response = await request(`/api/v1/stories/${storyId}/unshare`, { method: "POST" });
   throwForStatus(response, "This story couldn't be found.");
   return response.json();
 }

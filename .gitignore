@@ -21,6 +21,9 @@ backend/.env
 htmlcov/
 .coverage
 
+# --- Local image storage (Phase 9 dev-only ImageStorageProvider) ---
+backend/uploads/
+
 # --- ML artifacts ---
 backend/ml/models/*.pt
 backend/ml/models/*.pth

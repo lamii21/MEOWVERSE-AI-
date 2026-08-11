@@ -123,7 +123,11 @@ def test_nonexistent_story_returns_404(client):
     assert response.status_code == 404
 
 
-def test_sharing_a_story_makes_it_publicly_accessible(client):
+def test_sharing_a_story_makes_it_publicly_accessible(client, register_user):
+    # Phase 9: sharing a story now requires owning its parent analysis
+    # (previously unauthenticated, Phase 7) — see tests/test_ownership.py
+    # for the cat-card equivalent of this ownership enforcement.
+    register_user()
     analysis_id = _create_analysis(client)
     story_response = client.post(f"/api/v1/analyses/{analysis_id}/story")
     story_id = story_response.json()["id"]
@@ -132,13 +136,15 @@ def test_sharing_a_story_makes_it_publicly_accessible(client):
     assert share_response.status_code == 200
     assert share_response.json()["is_public"] is True
 
+    client.post("/api/v1/auth/logout")
     public_response = client.get(f"/api/v1/stories/{story_id}")
     assert public_response.status_code == 200
     assert public_response.json()["id"] == story_id
     assert public_response.json()["story"]["title"]
 
 
-def test_sharing_is_idempotent(client):
+def test_sharing_is_idempotent(client, register_user):
+    register_user()
     analysis_id = _create_analysis(client)
     story_response = client.post(f"/api/v1/analyses/{analysis_id}/story")
     story_id = story_response.json()["id"]
@@ -152,9 +158,28 @@ def test_sharing_is_idempotent(client):
     assert second.json()["is_public"] is True
 
 
-def test_sharing_a_nonexistent_story_returns_404(client):
+def test_sharing_a_nonexistent_story_returns_404(client, register_user):
+    register_user()
     fake_id = "00000000-0000-0000-0000-000000000000"
     response = client.post(f"/api/v1/stories/{fake_id}/share")
+    assert response.status_code == 404
+
+
+def test_sharing_a_story_without_authentication_returns_401(client):
+    analysis_id = _create_analysis(client)
+    story_response = client.post(f"/api/v1/analyses/{analysis_id}/story")
+    story_id = story_response.json()["id"]
+    assert client.post(f"/api/v1/stories/{story_id}/share").status_code == 401
+
+
+def test_cannot_share_someone_elses_story(client, register_user):
+    register_user(display_name="Owner")
+    analysis_id = _create_analysis(client)
+    story_id = client.post(f"/api/v1/analyses/{analysis_id}/story").json()["id"]
+    client.post("/api/v1/auth/logout")
+
+    register_user(display_name="Stranger")
+    response = client.post(f"/api/v1/stories/{story_id}/share")
     assert response.status_code == 404
 
 

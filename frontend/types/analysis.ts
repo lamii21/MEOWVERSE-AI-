@@ -51,4 +51,12 @@ export interface AnalysisResult {
   /** Whether the Cat Card has been explicitly shared (Phase 8) — see
    * POST /api/v1/analyses/{id}/share. Always false for a fresh analysis. */
   is_public: boolean;
+  /** Phase 9: true if this analysis belongs to the *caller* — either
+   * auto-owned (created while signed in) or claimed via POST .../save.
+   * Always false on a public (someone-else's-shared-cat) view, even if
+   * that cat has an owner — see analysis_row_to_result's docstring on
+   * the backend for why this is never leaked to other viewers. */
+  owned: boolean;
+  is_favorite: boolean;
+  image_url: string | null;
 }

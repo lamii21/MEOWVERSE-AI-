@@ -4,236 +4,259 @@ _Last updated: 2026-08-11_
 
 ## Current Phase
 
-**Phase 8 — Magical Experience & Cat Card: complete and verified
-end-to-end.** Phase 9 (Auth & Persistence) is next, not yet started.
+**Phase 9 — Authentication, User Accounts & Persistent Cat Collection:
+complete and verified end-to-end.** Phase 10 is next, not yet started.
 
 ## What Exists
 
-- `ARCHITECTURE.md`, `ROADMAP.md`, `PROJECT_STATUS.md`, `README.md`
-- Git repository initialized at project root (nothing committed yet —
-  commits happen only when explicitly requested)
 - `backend/` —
-  - `app/models/analysis.py` — `CatAnalysisModel` gained `is_public`
-    (Boolean, default `False`), same explicit-share-only contract as
-    `stories.is_public` from Phase 7. Migration `d64ea3d2f0bd`.
-  - `app/repositories/analysis_repository.py` — new
-    `get_public_analysis`/`set_public`, mirroring the story
-    repository's equivalents.
-  - `app/schemas/analysis.py` — `AnalysisResult` gained `is_public: bool`.
-  - `app/api/v1/analyses.py` — new `GET /api/v1/analyses/{id}` (404
-    unless public) and `POST /api/v1/analyses/{id}/share` (idempotent),
-    backing the new `/cat/[id]` public Cat Card page. A `_row_to_result`
-    helper converts a `CatAnalysisModel` row back into the full
-    `AnalysisResult` shape (breed/colors/profile all reconstructed from
-    the persisted JSONB).
-  - Tests: 6 new tests in `test_analyses.py` (private-by-default,
-    404-when-private, share-makes-public, share-is-idempotent,
-    share-nonexistent-404, nonexistent-cat-404). **81/81 backend tests
-    passing** (was 75).
+  - `app/models/user.py`, `session.py`, `achievement.py` — new
+    `UserModel` (email unique+indexed, `password_hash` via bcrypt,
+    display_name, avatar_url), `SessionModel` (opaque token hash,
+    expiry, FK CASCADE to user), `UserAchievementModel` (unique on
+    `user_id`+`achievement_key`).
+  - `app/core/security.py` — `bcrypt` used directly (not
+    `passlib[bcrypt]` — confirmed incompatible with installed bcrypt
+    5.0.0 before writing any code), `secrets.token_urlsafe(32)`
+    session tokens, SHA-256 token hashing for DB storage/lookup.
+  - `app/core/auth_deps.py` — `get_current_user_optional` /
+    `get_current_user` FastAPI dependencies, reading the session
+    cookie and resolving it to a `UserModel`.
+  - `app/core/csrf.py` — `verify_same_origin`, an `Origin`-header
+    check applied to every mutating authenticated endpoint (see
+    Security Decisions in ARCHITECTURE.md §11).
+  - `app/repositories/user_repository.py`, `session_repository.py`,
+    `achievement_repository.py` — new.
+  - `app/services/auth_service.py` — register/authenticate/session
+    create/lookup/logout; identical error for "no such email" and
+    "wrong password" (no user enumeration).
+  - `app/services/achievement_definitions.py`,
+    `collection_service.py` — 5 achievements (First Meow, Cat
+    Explorer, Collector, Rainbow Collector, Legendary Hunter),
+    computed from real stored data on read, never fabricated.
+  - `app/schemas/user.py`, `collection.py` — `UserOut` never includes
+    `password_hash`; `UserCreate` validates password length + letter +
+    digit.
+  - `app/api/v1/auth.py` — `POST /register` (201, rate-limited),
+    `POST /login`, `POST /logout` (204, CSRF-checked), `GET /me`,
+    `PATCH /me` (CSRF-checked). Sets an httpOnly, `SameSite=Lax`
+    session cookie.
+  - `app/api/v1/collection.py` — `GET /api/v1/me/collection` (filter
+    by rarity/favorites, search, sort, paginate), `GET
+    /api/v1/me/stats`, `GET /api/v1/me/achievements`.
+  - `app/storage/` — new `ImageStorageProvider` ABC +
+    `LocalImageStorageProvider` (disk-backed, served at `/media`),
+    interface shaped for a future S3-compatible swap. Never exposes
+    storage credentials to the frontend.
+  - `app/models/analysis.py` — gained `user_id` (nullable FK CASCADE —
+    `NULL` means an unclaimed guest analysis), `cat_name`, `rarity`,
+    `image_url`, `is_favorite`; two new composite indexes.
+  - `app/repositories/analysis_repository.py` — ownership-scoped
+    queries as the actual security boundary (every private-resource
+    function filters by `user_id` in the SQL itself, not after the
+    fact): `get_owned_analysis`, `claim_analysis` (atomic
+    check-and-set, prevents guest-analysis hijacking), `set_favorite`,
+    `set_public`/`set_private` (both ownership-gated), plus
+    `list_user_analyses`, `get_user_stats`, `get_distinct_color_names`
+    for the collection/stats endpoints.
+  - `app/api/v1/analyses.py` — `create_analysis` now auth-optional
+    (guests still get a full analysis, just unowned); new `POST
+    /{id}/save` (claims a guest analysis), `/favorite`, `/unfavorite`,
+    `/unshare`; `share_cat` now requires auth+ownership.
+    `analysis_row_to_result` takes a required `viewer_is_owner: bool`
+    kwarg with no default — see Security Decisions below, this is a
+    fixed real privacy bug, not a hypothetical.
+  - `app/api/v1/stories.py` — sharing/unsharing now auth+ownership
+    gated, matching analyses.
+  - `app/core/rate_limit.py` — rewritten behind a `RateLimiter`
+    Protocol (`InMemoryRateLimiter` today, Redis-swappable later
+    without touching call sites); a separately-keyed, tighter
+    `enforce_auth_rate_limit` protects register/login specifically.
+  - `app/core/config.py` — removed the pre-staged (unused) JWT
+    settings; added session cookie name/expiry/secure-flag,
+    auth-rate-limit threshold, image storage provider/dir settings.
+  - Migration `b04f6df3d75b` — new `users`/`sessions`/
+    `user_achievements` tables; `cat_analyses` gained `user_id`,
+    `cat_name`, `rarity` (backfilled from existing JSONB on all 341
+    pre-existing dev rows, then set `NOT NULL`), `image_url`,
+    `is_favorite`. Verified via a real upgrade → downgrade → upgrade
+    cycle with row-count/data-integrity checks at each step, not just
+    a syntax check.
+  - Tests: 4 new files — `test_auth.py` (16 tests: register/login/
+    logout/me, duplicate email, wrong password, weak password,
+    invalid session, rate-limit 429), `test_ownership.py` (guest vs.
+    authenticated creation, private-access-denial across users, the
+    save/claim flow, favorites, sharing-respects-ownership — including
+    two dedicated regression tests for the privacy bug below),
+    `test_collection.py` (collection filters/search/sort, stats never
+    counting unowned guest analyses, achievements never unlocking from
+    another user's activity), `test_csrf.py` (mismatched Origin
+    actually rejected with 403, matching/missing Origin allowed).
+    **140/140 backend tests passing** (was 81), ruff clean.
 - `frontend/` —
-  - `features/results/` — new feature area entirely:
-    - `rarity.ts` — `RARITY_VISUALS`, a config object mapping each of
-      the 6 `Rarity` values to a `tier` (1–6), a `treatment`
-      (plain/tint/shimmer/glow/aura/particles), and card/badge
-      classNames.
-    - `use-card-tilt.ts` — pointer-driven 3D tilt via Framer Motion
-      springs (`rotateX`/`rotateY`), no WebGL. Takes the target ref as
-      a parameter rather than creating one internally and returning it
-      bundled in an object — the latter isn't statically recognizable
-      as a ref by the `react-hooks/refs` (React Compiler) lint rule,
-      which then flags every read of it.
-    - `use-saved-cat.ts` — local "Save" bookmark, `localStorage` +
-      `useSyncExternalStore` (same pattern as Phase 7's story-favorite
-      hook, same SSR-hydration-safety reason).
-    - `components/ResultReveal.tsx` — the cinematic intro beat, then a
-      render-prop (`children(interactive: boolean)`) handing off to
-      the caller's layout.
-    - `components/CatCard.tsx` — the collectible card: image, name,
-      title, breed, rarity badge, magic power, personality,
-      `ConfidenceMeter`, `ColorPalette`, description, MeowVerse ID
-      (short id derived from the analysis UUID), and the action row
-      (Save/Share/Download PNG/Story/Wallpaper).
-    - `components/RarityAura.tsx` — per-tier animated flourish,
-      reduced-motion-aware (every animated variant has a static
-      equivalent).
-    - `components/ConfidenceMeter.tsx`, `components/ColorPalette.tsx`
-      — small presentational components.
-    - `components/ResultExperience.tsx` — top-level composition used
-      by `/analyze`: two-column desktop layout (Cat Card sticky-left,
-      story + transparency panel right), single-column on mobile.
-    - `components/PublicCatView.tsx` — read-only wrapper around
-      `CatCard` used by `/cat/[id]`.
-  - `app/cat/[id]/page.tsx` — new. Server component mirroring Phase
-    7's `/story/[id]`: fetches via `fetchPublicAnalysis`, `notFound()`
-    on 404.
-  - `services/analyses.ts` — new `shareAnalysis`, `fetchPublicAnalysis`;
-    `AnalysisErrorKind` gained `"not_found"`.
-  - `types/analysis.ts` — `AnalysisResult` gained `is_public: boolean`.
-  - `features/analyze/components/HowMeowVerseKnows.tsx` — visually
-    regrouped into two clearly labeled sections ("Real computer
-    vision" vs "Generative AI") instead of only being distinguishable
-    by icon color.
-  - `features/analyze/components/DemoResultSummary.tsx` — **deleted**,
-    replaced by `ResultExperience`. It was an explicitly-labeled Phase
-    3 placeholder ("The full magical results page... arrives in a
-    later phase") — this phase is that later phase.
-  - `app/globals.css` — fixed a real, previously undiscovered bug from
-    Phase 2: `--font-sans: var(--font-sans)` was self-referential, so
-    the entire app had silently been falling back to the browser's
-    default serif font instead of Geist Sans since the design system
-    was first built. Now `--font-sans: var(--font-geist-sans)`.
-  - `components/ui/progress.tsx` — not modified, but a real usage
-    footgun was discovered and worked around: `Progress` always
-    renders its own default track+indicator *in addition* to any
-    children passed to it, so `ConfidenceMeter` initially rendered two
-    stacked bars until its custom children were removed in favor of
-    the default styling.
-  - `package.json` — added `html-to-image` (PNG export).
-  - 6 new test files (27 new tests): `rarity.test.ts`,
-    `use-card-tilt.test.ts`, `ConfidenceMeter.test.tsx`,
-    `ColorPalette.test.tsx`, `ResultReveal.test.tsx`, `CatCard.test.tsx`.
-    **51/51 frontend tests passing** (was 24).
+  - `hooks/use-auth.ts` — TanStack Query IS the auth state store (no
+    separate React Context): `useCurrentUser()`'s cached result under
+    `["auth","me"]` is read everywhere via `useAuth()`
+    (`status: "loading"|"authenticated"|"guest"`); `useLogin`/
+    `useRegister`/`useLogout` mutate that cache directly.
+  - `services/auth.ts`, `collection.ts` — all requests use
+    `credentials: "include"` (httpOnly cookie auth, no token ever
+    touches JS-readable storage).
+  - `features/auth/components/AppNavbar.tsx` — auth-aware nav
+    (Home/Discover/My Cats/Profile + Achievements/Logout when
+    authenticated; Home/Discover/Login/Register as guest), with a
+    hamburger menu for mobile (see Real Bugs Found below — the
+    original desktop-only nav was unreachable below `md`).
+  - `features/auth/components/AuthCard.tsx`, `GuestSavePrompt.tsx`,
+    `RequireAuth.tsx` — shared auth-card chrome, the "create an
+    account to save this cat" prompt guests see on Save, and
+    client-side route protection for authenticated-only pages.
+  - `app/login/page.tsx`, `app/register/page.tsx` — MeowVerse-styled
+    (not generic forms), each wrapped in `<Suspense>` (Next.js 16
+    requires this for `useSearchParams()` during static prerendering —
+    a real, previously-undiscovered requirement hit this phase).
+  - `features/results/use-cat-actions.ts` — Save/Favorite as TanStack
+    `useMutation`s with optimistic updates and rollback-on-error via
+    `onMutate`/`onError`.
+  - `features/results/components/CatCard.tsx` — Save disabled once
+    owned; Favorite is now its own persistent-backend button (was a
+    local-only bookmark in Phase 8); Share disabled until owned;
+    `GuestSavePrompt` rendered for guests.
+  - `app/collection/page.tsx`, `app/collection/[id]/page.tsx` — real
+    collection gallery: filters (All/Favorites/rarity tiers), search,
+    sort (Newest/Oldest/Rarity/Name), empty state with a "Discover a
+    Cat" CTA.
+  - `app/profile/page.tsx` — display name, avatar, joined date, stats
+    (total cats, favorite breed, most common color, legendary count,
+    stories created — all computed from real stored data), achievements.
+  - `app/settings/page.tsx` — display name update, logout.
+  - Deleted `features/landing/components/Navbar.tsx` (superseded by
+    `AppNavbar`) and `features/results/use-saved-cat.ts` (superseded
+    by the persistent-backend favorite).
+  - 5 new/rewritten test files (`use-auth.test.tsx`,
+    `GuestSavePrompt.test.tsx`, `RequireAuth.test.tsx`,
+    `CollectionCard.test.tsx`, fully rewritten `CatCard.test.tsx`) plus
+    a shared `test-utils/render-with-query.tsx` helper.
+    **69/69 frontend tests passing** (was 51), lint/build clean.
 
-## Real Results (Phase 8)
+## Real Results (Phase 9)
 
-- **Both suites green**: 81/81 backend (pytest, real Postgres),
-  51/51 frontend (Vitest + RTL).
+- **Both suites green**: 140/140 backend (pytest, real Postgres),
+  69/69 frontend (Vitest + RTL).
 - **Verified end-to-end via a live, scripted Playwright run** against
-  real `uvicorn` + `next dev` servers: landing → upload → analyze →
-  cinematic reveal ("A new cat has appeared...") → Cat Card settles →
-  pointer-tilt hover → Save → Share (clipboard-copy fallback, since
-  headless Chromium has no native share sheet) → Download PNG (a real
-  1.1MB, non-blank PNG file, inspected visually) → Generate Story
-  (reused the Phase 7 flow unchanged) → opened the shared `/cat/[id]`
-  link in a new tab and confirmed it rendered the same card, correctly
-  still showing "Saved" (same `localStorage`) → responsive screenshots
-  at 320/375/390/768/1024/1440px → a separate full run with Playwright
-  `reducedMotion: "reduce"` emulation confirming the intro beat is
-  skipped and the card is immediately interactive. **Zero console
-  errors on the final run.**
-- **Five real bugs found and fixed during verification, not glossed
-  over** (in the order discovered):
-  1. `html-to-image`'s `cacheBust: true` option appends a `?timestamp`
-     query string to every image src to force a fresh fetch — but the
-     cat photo's src is a `blob:` URL, which doesn't support query
-     strings at all, so every export attempt threw. Removed (and
-     unnecessary anyway for a one-shot export).
-  2. A genuine `useReducedMotion()` race in `ResultReveal`: framer-motion's
-     hook resolves asynchronously (defers to an internal effect so
-     it's SSR-safe), so reading it directly in a `useState` initializer
-     always captured its pre-resolution default (`false`) — the full
-     animated intro played once even with the OS preference set,
-     before the state caught up. Fixed with a dedicated syncing effect.
-  3. `app/globals.css`'s `--font-sans: var(--font-sans)` self-reference
-     — a Phase 2 bug that had been silently active through every prior
-     phase's screenshots, only caught because Phase 8's typography
-     focus prompted a close look at rendered text.
-  4. `ConfidenceMeter` rendered two stacked progress bars — the shared
-     `Progress` component always appends its own default track
-     regardless of what children are passed to it.
-  5. The magic-power `Badge` clipped its text off the edge of the card
-     — `Badge` is `whitespace-nowrap` (built for short tags), but
-     `magic_power` can be a full sentence. Rendered as wrapping plain
-     text instead.
-- **PNG export produces a real, complete file** — verified by
-  inspecting the actual downloaded 1.1MB PNG (not just checking that a
-  download event fired): correct layout, rarity gradient, all text,
-  the confidence meter, and the color palette all present and legible.
+  real `uvicorn` + `next dev` servers, the exact 21-step flow from the
+  spec: guest analyze → view result → click Save → auth prompt appears
+  → register → cat saved to the new account → refresh → still there →
+  open collection → open the cat → favorite it → refresh → favorite
+  persists → share it → open the public `/cat/[id]` page in a fresh
+  context → confirm no private info (favorite/owned status, email,
+  user id) leaks to a public viewer → logout → protected pages
+  correctly redirect to login → login again → collection state fully
+  restored. All 21 steps passed.
+- **Responsive verification** at 320/375/390/768/1024/1440px.
+- **Three real bugs found and fixed during verification, not
+  hypothetical**:
+  1. **Privacy leak**: the row→API-response converter computed
+     `owned = owned or row.user_id is not None` even on the *public*
+     viewing path, so any public `/cat/[id]` visitor saw `owned: true`
+     and the real owner's `is_favorite` state. Found via my own
+     security review before Playwright testing. Fixed by making
+     `viewer_is_owner: bool` a required kwarg with no default, and
+     unconditionally deriving `owned`/`is_favorite` from it. Covered
+     by dedicated regression tests and reconfirmed live via the E2E
+     script.
+  2. **Logout race condition**: `router.push("/")` after logout raced
+     against `RequireAuth`'s own redirect-to-login effect (which fires
+     the instant the auth cache clears), so logging out from a
+     protected page like `/settings` could land on
+     `/login?next=/settings` instead of `/` — a confusing thing to see
+     right after asking to sign out. Fixed with a hard navigation
+     (`window.location.href`) instead of a client-side push.
+  3. **Mobile nav gap**: at 320px the nav's link list was `hidden
+     md:flex` with no mobile alternative — Home/Discover/My Cats/
+     Profile were unreachable except via the small avatar icon. Fixed
+     with a hamburger menu, verified interactively (menu opens, links
+     actually navigate).
 
 ## What Does Not Exist Yet
 
-Image generation (Phase 13 — Wallpaper button is a labeled placeholder
-only), full auth, the full Phase 9 database schema (users, favorites,
-achievements), a page to browse "Saved" cats (Phase 8's Save is a
-local bookmark with nowhere to view the list yet — Phase 10),
-collection/achievements, similarity search, Grad-CAM, full E2E test
-suite (Phase 14), a `mood` signal (mentioned as "if available" in the
-Phase 8 brief — no such field exists in `CatProfile`, so the Cat Card
-honestly omits it rather than fabricate one). See ROADMAP.md Phases
-9–17.
+Image generation (Phase 13), advanced analytics, a mobile app, a
+social feed, chat, OAuth login, Redis-backed rate limiting (the
+abstraction is in place, the implementation is still in-memory), and
+S3-compatible image storage (the `ImageStorageProvider` interface is
+ready, only the local-disk implementation exists). See ROADMAP.md
+Phases 10–17.
 
 ## Known Limitations / Honest Gaps
 
-- **`is_public` sharing has no ownership/auth check**, for both
-  stories (Phase 7) and analyses (Phase 8) — anyone who knows a UUID
-  (not enumerable) can make it public. Acceptable for now: there's no
-  user/auth system at all yet (Phase 9), and the action is additive/
-  idempotent (can only reveal, never mutate or delete).
-- **Save is local-only.** `use-saved-cat.ts` bookmarks to
-  `localStorage`, not a real per-user collection — there's no backend
-  table for it, and no page to browse saved cats yet (Phase 10). The
-  Phase 8 brief listed "Save" and "Favorite" as separate actions;
-  they were deliberately consolidated into one button since two
-  divergent local-only flags with no collection page to view either
-  against would have been dead-end UI — documented as a scope decision,
-  not an oversight.
-- **Generate Wallpaper is a real, honest placeholder** — disabled with
-  a `title="Coming in a future update"` tooltip, not a button that
-  pretends to work. Depends on `ImageGenerationProvider` (Phase 13,
-  still a null stub).
-- **No live Anthropic API call tested** — unchanged gap from Phases 6–7.
-- **Local dev Postgres on host port 5433** — unchanged from Phase 7
-  (native Windows Postgres service conflict on 5432).
+- **Rate limiting is still in-memory, single-process** — unchanged
+  from Phase 6, now behind a swappable `RateLimiter` Protocol so a
+  Redis implementation is additive, not a rewrite.
+- **Image storage is local-disk only** — `LocalImageStorageProvider`
+  writes to a configurable directory served via `/media`; the
+  `ImageStorageProvider` ABC is shaped for S3 but no cloud
+  implementation exists yet.
+- **Demo (offline, no `ANTHROPIC_API_KEY`) analyses persist the same
+  as real ones** — the demo/real distinction is about the *content*
+  (`profile_mode`/`story_mode: "demo"`), not about whether the row is
+  saved; this is unchanged behavior from Phase 7/8, documented rather
+  than silently relied upon.
+- **Client-side route protection only** (`RequireAuth` wrapper), not
+  server-side/middleware — matches the codebase's established
+  all-client-component pattern; accepted tradeoff is a brief
+  loading-state flash before redirect, never actual data exposure
+  (every private endpoint is independently ownership-checked on the
+  backend regardless of what the frontend renders).
+- **One unavoidable browser-console 401 per guest page load**: an
+  httpOnly cookie can't be checked client-side before asking the
+  server, so `GET /api/v1/auth/me` always 401s once for a guest and
+  the browser logs it as a failed network request — this is
+  architectural, not a bug, and does not affect the app's actual
+  zero-JS-error bar.
+- **No live Anthropic API call tested** — unchanged gap from Phases 6–8.
+- **Local dev Postgres on host port 5433** — unchanged from Phase 7.
 - **Docker gap unchanged from Phase 4/5**: the backend image doesn't
-  install `requirements-ml.txt`, so breed/color analysis stay demo-mode
-  in containers.
-- **Rate limiting is in-memory, single-process** — unchanged from
-  Phase 6.
+  install `requirements-ml.txt`, so breed/color analysis stay
+  demo-mode in containers.
 - **`vitest.config.ts` uses `pool: "threads"`** — unchanged from
   Phase 7 (Windows + OneDrive-synced-path-with-a-space environment
   quirk).
 
 ## Next Steps
 
-Begin Phase 9: Auth & Persistence. Email/password auth, secure
-password hashing, token issuance, the full DB schema (users,
-cat_profiles, analysis_results, generated_assets, favorites,
-achievements — building out from Phase 7/8's minimal `cat_analyses`/
-`stories` subset), and real analysis history so Phase 8's local-only
-"Save" can grow into an actual per-user collection.
+Begin Phase 10. Candidates per ROADMAP.md: deeper collection features
+(bulk actions, pagination polish), a real image-generation provider
+for the Wallpaper button (Phase 13 groundwork), or OAuth login —
+nothing beyond Phase 9's explicit scope has been started.
 
 ## Notes for Future Sessions
 
-- **A hook that creates a ref and returns it bundled inside an object
-  isn't statically recognizable as a ref by the `react-hooks/refs`
-  (React Compiler) lint rule** — every read of `returnedObject.ref` in
-  JSX then gets flagged as an unsafe render-time ref access. Fix: have
-  the *consuming* component create the ref via its own `useRef()` call
-  and pass it *into* the hook, rather than the hook creating and
-  returning one. Found and fixed in `use-card-tilt.ts` this phase.
-- **`useReducedMotion()` (and any hook backed by a browser media query)
-  resolves asynchronously for SSR-safety** — it returns its default
-  value on the very first render and only reflects the real value
-  after an internal effect fires and triggers a re-render. Reading it
-  directly in a `useState` initializer captures the stale default
-  permanently for that state variable; it needs its own syncing
-  `useEffect` (see `ResultReveal.tsx`) if the initial render must
-  reflect the real preference. Found and fixed in `ResultReveal.tsx`
-  this phase. This is the second time this exact shape of bug has
-  appeared in this codebase (`useSyncExternalStore` solved the
-  analogous `localStorage`-read version of it in Phase 7) — worth
-  remembering as a category, not just a one-off fix.
-- **A shared UI primitive's implicit behavior can silently double up
-  markup**: `components/ui/progress.tsx`'s `Progress` renders
-  `{children}` *and then* its own default `ProgressTrack`+`ProgressIndicator`
-  unconditionally — passing a custom track as children doesn't replace
-  the default, it adds a second one. Worth checking any shared
-  component's actual render output (not just its prop types) before
-  assuming customization-via-children works the way it looks like it
-  should.
-- **`Badge` is `whitespace-nowrap` by design** (built for short,
-  fixed-length tags) — never use it for a field whose content length
-  isn't bounded by the schema (e.g. a free-text LLM-generated
-  sentence). Plain wrapping text is the correct choice for those.
-- **`html-to-image` (and canvas-export libraries generally) can't
-  handle query strings appended to `blob:` URLs** — the `cacheBust`
-  option is meant for cached *remote* images and actively breaks
-  local blob-URL image sources. Skip it for one-shot exports of
-  locally-sourced content.
-- Previously noted Base UI quirks, the dark-mode media-query strategy,
-  forced-tool-use for structured LLM output, the schemas/common.py
-  circular-import fix, the `profile_mode`/`story_mode` vs
-  `breed_mode`/`colors_mode` vocabulary distinction, the `useSyncExternalStore`
-  pattern for SSR-safe external state (Phase 7), the `OxfordIIITPet`
-  `_bin_labels` gotcha (Phase 4), and the "BaseModel doesn't require
-  weights" pattern (Phase 5) all still apply.
+- **`passlib[bcrypt]==1.7.4` is broken against `bcrypt==5.0.0`**
+  (`AttributeError: module 'bcrypt' has no attribute '__about__'`),
+  confirmed empirically, not assumed. Use `bcrypt` directly.
+- **DB-backed opaque session tokens beat JWT here** specifically
+  because logout needs to be immediate and real (a DB row delete) —
+  a stateless JWT can't be revoked without extra machinery. Full
+  rationale in ARCHITECTURE.md §11.
+- **Ownership must be enforced in the repository query itself**
+  (`WHERE user_id = :user_id`), not as a check bolted onto the route
+  handler afterward — the latter is one missed `if` away from a
+  cross-user data leak; the former makes it structurally impossible.
+- **A converter function's "is this the owner's view" flag should
+  never have a default** — the Phase 9 privacy bug (see above) existed
+  specifically because `owned: bool = False` let call sites forget to
+  pass it explicitly. A required kwarg turns "forgot to think about
+  this" into a type error.
+- **`useSearchParams()` requires a `<Suspense>` boundary** for Next.js
+  16 static prerendering, discovered building `/login`/`/register`.
+- **Hard navigation (`window.location.href`), not `router.push`, for
+  logout** — sidesteps a real race against `RequireAuth`'s
+  redirect-to-login effect. See the logout bug above.
+- Previously noted lessons (Base UI quirks, dark-mode media-query
+  strategy, forced-tool-use for structured LLM output, the
+  `useSyncExternalStore` pattern for SSR-safe external state, the
+  ref-returned-from-a-hook React Compiler lint gotcha, the
+  self-referential `--font-sans` bug, `Badge`'s `whitespace-nowrap`
+  footgun) all still apply.
+</content>
+</invoke>

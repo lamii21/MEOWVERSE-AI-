@@ -3,10 +3,21 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth_deps import get_current_user, get_current_user_optional
 from app.core.config import get_settings
+from app.core.csrf import verify_same_origin
 from app.core.database import get_db
 from app.core.rate_limit import enforce_rate_limit
-from app.repositories.analysis_repository import get_public_analysis, set_public
+from app.models.user import UserModel
+from app.repositories.analysis_repository import (
+    claim_analysis,
+    get_analysis,
+    get_owned_analysis,
+    get_public_analysis,
+    set_favorite,
+    set_private,
+    set_public,
+)
 from app.schemas.analysis import AnalysisResult, BreedPrediction
 from app.schemas.common import ColorSwatch
 from app.schemas.profile import CatProfile
@@ -17,7 +28,15 @@ router = APIRouter(prefix="/api/v1/analyses", tags=["analyses"])
 ACCEPTED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
-def _row_to_result(row) -> AnalysisResult:
+def analysis_row_to_result(row, *, viewer_is_owner: bool) -> AnalysisResult:
+    """`viewer_is_owner` is a required, explicit kwarg (no default) on
+    purpose — every call site has to state which case it's in. `owned`
+    and `is_favorite` are owner-only signals: a public /cat/[id] viewer
+    must never learn whether (or by whom) a cat is favorited, or see an
+    "owned" flag that a careless frontend could render as if it were
+    *their own* — see Phase 9 spec §18, "public pages should expose
+    only intended public information."
+    """
     return AnalysisResult(
         id=row.id,
         detected=True,
@@ -29,6 +48,9 @@ def _row_to_result(row) -> AnalysisResult:
         profile=CatProfile.model_validate(row.profile),
         profile_mode=row.profile_mode,
         is_public=row.is_public,
+        owned=viewer_is_owner,
+        is_favorite=row.is_favorite if viewer_is_owner else False,
+        image_url=row.image_url,
     )
 
 
@@ -40,7 +62,12 @@ def _row_to_result(row) -> AnalysisResult:
 async def create_analysis(
     file: UploadFile = File(...),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel | None = Depends(get_current_user_optional),  # noqa: B008
 ) -> AnalysisResult:
+    """Guest-accessible on purpose (Phase 9 spec §7: "guests should still
+    be able to upload/analyze/view results"). If the request carries a
+    valid session, the analysis is auto-owned by that user; otherwise it's
+    created unowned and can be claimed later via POST .../save."""
     settings = get_settings()
 
     if file.content_type not in ACCEPTED_CONTENT_TYPES:
@@ -55,37 +82,127 @@ async def create_analysis(
         )
 
     try:
-        return await analyze_image(image_bytes, db)
+        return await analyze_image(
+            image_bytes, file.content_type, db, user_id=user.id if user else None
+        )
     except InvalidImageError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{analysis_id}", response_model=AnalysisResult)
-async def get_public_cat(
-    analysis_id: uuid.UUID, db: AsyncSession = Depends(get_db)  # noqa: B008
+async def get_cat(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel | None = Depends(get_current_user_optional),  # noqa: B008
 ) -> AnalysisResult:
-    """Powers the public /cat/[id] Cat Card share page (Phase 8). An
-    analysis is private by default — this 404s until the owner
-    explicitly shares it via POST .../share below, same contract as
-    the story share endpoint from Phase 7.
+    """Powers both the public /cat/[id] share page (Phase 8) and a
+    signed-in owner viewing their own private cat's detail page (Phase
+    9) — the same endpoint, because the visibility rule is exactly
+    "public OR you own it," and duplicating this route per-caller-type
+    would just be two places to keep an ownership check correct in.
     """
     row = await get_public_analysis(db, analysis_id)
+    if row is not None:
+        return analysis_row_to_result(row, viewer_is_owner=False)
+
+    if user is not None:
+        row = await get_owned_analysis(db, analysis_id, user.id)
+        if row is not None:
+            return analysis_row_to_result(row, viewer_is_owner=True)
+
+    raise HTTPException(status_code=404, detail="Cat not found.")
+
+
+@router.post(
+    "/{analysis_id}/save",
+    response_model=AnalysisResult,
+    dependencies=[Depends(verify_same_origin)],
+)
+async def save_cat(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel = Depends(get_current_user),  # noqa: B008
+) -> AnalysisResult:
+    """The guest → account flow (Phase 9 spec §7/§28): a cat analyzed
+    anonymously has no owner until this is called. Only works once per
+    cat — an already-owned analysis (by this user or anyone else) can't
+    be re-claimed, so this can't be used to "steal" someone else's cat
+    by guessing its id.
+    """
+    row = await claim_analysis(db, analysis_id, user.id)
+    if row is None:
+        existing = await get_analysis(db, analysis_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Cat not found.")
+        raise HTTPException(status_code=409, detail="This cat has already been saved.")
+    return analysis_row_to_result(row, viewer_is_owner=True)
+
+
+@router.post(
+    "/{analysis_id}/favorite",
+    response_model=AnalysisResult,
+    dependencies=[Depends(verify_same_origin)],
+)
+async def favorite_cat(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel = Depends(get_current_user),  # noqa: B008
+) -> AnalysisResult:
+    row = await set_favorite(db, analysis_id, user.id, True)
     if row is None:
         raise HTTPException(status_code=404, detail="Cat not found.")
-    return _row_to_result(row)
+    return analysis_row_to_result(row, viewer_is_owner=True)
 
 
-@router.post("/{analysis_id}/share", response_model=AnalysisResult)
+@router.post(
+    "/{analysis_id}/unfavorite",
+    response_model=AnalysisResult,
+    dependencies=[Depends(verify_same_origin)],
+)
+async def unfavorite_cat(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel = Depends(get_current_user),  # noqa: B008
+) -> AnalysisResult:
+    row = await set_favorite(db, analysis_id, user.id, False)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Cat not found.")
+    return analysis_row_to_result(row, viewer_is_owner=True)
+
+
+@router.post(
+    "/{analysis_id}/share",
+    response_model=AnalysisResult,
+    dependencies=[Depends(verify_same_origin)],
+)
 async def share_cat(
-    analysis_id: uuid.UUID, db: AsyncSession = Depends(get_db)  # noqa: B008
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel = Depends(get_current_user),  # noqa: B008
 ) -> AnalysisResult:
     """Flips an analysis to public so its /cat/[id] Cat Card becomes
     viewable. Idempotent, only ever triggered by an explicit "Share"
-    click — never automatic. No auth/ownership system yet (Phase 9),
-    same intentionally-unauthenticated stance as every other
-    analysis/story endpoint in this project so far.
+    click — never automatic. Phase 9: now requires the caller to own
+    the cat (previously unauthenticated/unowned, Phase 8) — a private
+    resource must never be publishable by anyone other than its owner.
     """
-    row = await set_public(db, analysis_id)
+    row = await set_public(db, analysis_id, user.id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cat not found.")
-    return _row_to_result(row)
+    return analysis_row_to_result(row, viewer_is_owner=True)
+
+
+@router.post(
+    "/{analysis_id}/unshare",
+    response_model=AnalysisResult,
+    dependencies=[Depends(verify_same_origin)],
+)
+async def unshare_cat(
+    analysis_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel = Depends(get_current_user),  # noqa: B008
+) -> AnalysisResult:
+    row = await set_private(db, analysis_id, user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Cat not found.")
+    return analysis_row_to_result(row, viewer_is_owner=True)

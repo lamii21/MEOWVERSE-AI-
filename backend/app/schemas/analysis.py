@@ -50,3 +50,14 @@ class AnalysisResult(BaseModel):
     # POST /api/v1/analyses/{id}/share. Always False for a freshly
     # created analysis; sharing is always a separate, explicit act.
     is_public: bool = False
+    # Phase 9:
+    owned: bool = False
+    """Whether this analysis is already in the *caller's* collection —
+    true if an authenticated request created it (auto-owned) or it was
+    later claimed via POST .../save. Drives the frontend's Save button
+    state without a second round-trip."""
+    is_favorite: bool = False
+    image_url: str | None = None
+    """Set if the photo was persisted via ImageStorageProvider (Phase 9)
+    — best-effort, same philosophy as `id`: None doesn't fail the
+    request, it just means the image won't survive a refresh."""

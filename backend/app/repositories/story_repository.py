@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.analysis import CatAnalysisModel
 from app.models.story import StoryModel
 from app.schemas.story import CatStory, StoryStyle
 
@@ -46,7 +47,32 @@ async def get_latest_story(
 
 
 async def get_story(db: AsyncSession, story_id: uuid.UUID) -> StoryModel | None:
+    """Unfiltered — internal use only (e.g. building a public/owner
+    view where the caller applies its own visibility check right after).
+    Prefer `get_public_story`/`get_owned_story` at API boundaries so the
+    filter can't be forgotten by a future caller."""
     return await db.get(StoryModel, story_id)
+
+
+async def get_public_story(db: AsyncSession, story_id: uuid.UUID) -> StoryModel | None:
+    row = await db.get(StoryModel, story_id)
+    if row is None or not row.is_public:
+        return None
+    return row
+
+
+async def get_owned_story(
+    db: AsyncSession, story_id: uuid.UUID, user_id: uuid.UUID
+) -> StoryModel | None:
+    """A story has no `user_id` of its own — ownership is inherited from
+    its parent analysis, so this joins through `cat_analyses`."""
+    stmt = (
+        select(StoryModel)
+        .join(CatAnalysisModel, StoryModel.analysis_id == CatAnalysisModel.id)
+        .where(StoryModel.id == story_id, CatAnalysisModel.user_id == user_id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def count_stories(db: AsyncSession, analysis_id: uuid.UUID, style: StoryStyle) -> int:
@@ -57,14 +83,38 @@ async def count_stories(db: AsyncSession, analysis_id: uuid.UUID, style: StorySt
     return result.scalar_one()
 
 
-async def set_public(db: AsyncSession, story_id: uuid.UUID) -> StoryModel | None:
-    """Flips a story to public — the explicit "Share" act (Phase 7 §17).
-    Never automatic; there is no path that calls this besides the user
-    pressing Share on a story they just generated."""
-    row = await db.get(StoryModel, story_id)
+async def count_user_stories(db: AsyncSession, user_id: uuid.UUID) -> int:
+    stmt = (
+        select(func.count(StoryModel.id))
+        .join(CatAnalysisModel, StoryModel.analysis_id == CatAnalysisModel.id)
+        .where(CatAnalysisModel.user_id == user_id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one()
+
+
+async def set_public(
+    db: AsyncSession, story_id: uuid.UUID, user_id: uuid.UUID
+) -> StoryModel | None:
+    """Flips a story to public — the explicit "Share" act (Phase 7 §17),
+    now ownership-gated (Phase 9): only the owner of the parent analysis
+    may share its story."""
+    row = await get_owned_story(db, story_id, user_id)
     if row is None:
         return None
     row.is_public = True
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def set_private(
+    db: AsyncSession, story_id: uuid.UUID, user_id: uuid.UUID
+) -> StoryModel | None:
+    row = await get_owned_story(db, story_id, user_id)
+    if row is None:
+        return None
+    row.is_public = False
     await db.commit()
     await db.refresh(row)
     return row

@@ -395,15 +395,125 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   new ML models, authentication, image generation, vector database
   migration, advanced analytics.
 
-## Phase 9 — Auth & Persistence
-- ⬜ Email/password auth, secure password hashing, token issuance
-- ⬜ DB schema + Alembic migrations (users, cat_analyses, cat_profiles,
-     analysis_results, stories, generated_assets, favorites, achievements)
-- ⬜ Persist analyses; analysis history endpoint
+## Phase 9 — Authentication, User Accounts & Persistent Cat Collection ✅
+- ✅ Real `users`/`sessions`/`user_achievements` tables + `cat_analyses`
+  ownership/favorite/rarity/image columns (migration `b04f6df3d75b`,
+  chained off Phase 8's head, not a fresh baseline — see
+  ARCHITECTURE.md §6). Verified against the actual populated dev DB:
+  upgrade (with a real data backfill for 341 pre-existing rows),
+  downgrade, re-upgrade, data integrity checked after each step.
+- ✅ Email/password auth: register/login/logout/me
+  (`POST/GET /api/v1/auth/*`), bcrypt password hashing (not
+  `passlib[bcrypt]`, which is pre-staged since Phase 1 but confirmed
+  broken against this project's installed bcrypt 5.x before writing
+  any auth code), DB-backed opaque session tokens in an httpOnly
+  `SameSite=Lax` cookie — not JWT, despite `python-jose` also being
+  pre-staged; see ARCHITECTURE.md §11 for the full security-decision
+  writeup the spec asked for.
+- ✅ Server-side ownership enforcement, not just frontend route
+  guards: every private-resource repository function
+  (`get_owned_analysis`/`get_owned_story`, `claim_analysis`,
+  `set_favorite`, `set_public`/`set_private`) filters by `user_id` at
+  the query level, so a query simply cannot return another user's
+  private row — not a check that a future endpoint could forget.
+  Verified with a dedicated cross-user test suite
+  (`tests/test_ownership.py`): guest can't view a stranger's private
+  cat, a second user can't view/favorite/share/unshare a first user's
+  cat, claiming an already-owned cat fails with 409.
+- ✅ Guest experience fully preserved: upload/analyze/view/generate
+  stories all still work with no account — an authenticated request
+  auto-owns its analysis immediately (no separate save step), a guest
+  analysis is created unowned and stays fully functional, just
+  invisible to any collection query until explicitly claimed via
+  `POST /api/v1/analyses/{id}/save` after registering — which also
+  means demo/anonymous browsing can never silently become a permanent
+  record (spec §17), since stats/achievements queries only ever see
+  owned rows in the first place.
+- ✅ Real image persistence: `ImageStorageProvider` abstraction
+  (`app/storage/`) + a genuine `LocalImageStorageProvider` (not a
+  stub — the collection page needs the photo to survive a refresh),
+  served via a `/media` static mount, interface shaped for a later
+  S3-compatible swap with no caller changes.
+- ✅ Collection: `GET /api/v1/me/collection` (filter by rarity/favorites,
+  search by name/breed, sort newest/oldest/rarity/name, paginated) +
+  `GET /api/v1/me/stats` (total cats, favorite breed, most common
+  color, legendary+ count, favorites count, stories created — every
+  number a real query scoped to `user_id`, never fabricated) +
+  `GET /api/v1/me/achievements` (5 achievements — 🐾 First Meow, 🌸 Cat
+  Explorer, 💎 Collector, 🌈 Rainbow Collector, 👑 Legendary Hunter —
+  compute-on-read against real stats, code-defined criteria, DB-persisted
+  unlock events).
+- ✅ Public sharing now ownership-gated: `POST .../share` and the new
+  `POST .../unshare` (for both analyses and stories) require owning
+  the resource — previously (Phase 7/8) open to anyone holding the id,
+  since no auth existed yet to check against. Public responses never
+  leak `is_favorite`/`owned` to a non-owner viewer — a real bug caught
+  during this phase's own testing (`viewer_is_owner` is now a required
+  kwarg with no default on the row→response converter, so no call site
+  can forget which case it's in).
+- ✅ CSRF: `SameSite=Lax` cookie as primary defense + an `Origin`-header
+  check dependency (`verify_same_origin`) as defense-in-depth on every
+  state-changing authenticated endpoint. Rate limiter refactored behind
+  a `RateLimiter` protocol (Redis-swappable later) with a tighter,
+  separately-keyed limit on register/login specifically.
+- ✅ Frontend: `hooks/use-auth.ts` (TanStack Query as the actual auth
+  state store — no separate Context), `/login`/`/register` (on-brand
+  copy: "Welcome back, cat explorer.", "Let's find your next little
+  friend."), a global auth-aware nav (incl. a real mobile hamburger
+  menu — a genuine gap found during responsive QA: the desktop nav
+  links had `hidden md:flex` with no mobile alternative at all),
+  `GuestSavePrompt` ("Your little friend deserves a home. 🐾"),
+  `RequireAuth` route guard, `/collection` (gallery, filters, search,
+  sort, empty state with a "Discover a Cat" CTA), `/collection/[id]`,
+  `/profile` (stats tiles + achievements list), `/settings` (display
+  name, logout). `CatCard`'s Save/Favorite migrated from Phase 8's
+  local-only bookmark to real backend mutations with optimistic UI and
+  rollback-on-error (`use-cat-actions.ts`).
+- ✅ Tests: 65 new backend tests (`test_auth.py`,
+  `test_ownership.py`, `test_collection.py`, + auth-related additions
+  to `test_analyses.py`/`test_stories_api.py` for the now-ownership-gated
+  share endpoints) — **137/137 backend tests passing** (was 81).
+  14 new frontend tests (`use-auth`, `GuestSavePrompt`, `RequireAuth`,
+  `CollectionCard`, plus a full rewrite of `CatCard.test.tsx` for its
+  new TanStack-Query-mutation architecture) — **69/69 frontend tests
+  passing** (was 55).
+- ✅ Verified end-to-end via a live, scripted Playwright run covering
+  the exact 21-step flow the spec laid out (guest analyze → Save →
+  guest prompt → register → save → refresh → collection persists →
+  open cat → favorite → refresh → favorite persists → share → public
+  page → verify no email/favorite/owned leak → logout → protected
+  page redirects to login → login again → collection restored) — every
+  step passed. A real bug was found and fixed mid-run, not glossed
+  over: logging out from a protected page raced a `router.push("/")`
+  against `RequireAuth`'s own redirect-to-login effect and could land
+  on `/login?next=/settings` right after voluntarily signing out;
+  fixed with a hard `window.location.href` navigation instead, which
+  also guarantees a fully clean client state. The only console entries
+  across the whole run are the browser's own "401 (Unauthorized)"
+  network log lines from the guest `/me` check — not a JS error, and
+  architecturally unavoidable (httpOnly cookies can't be checked
+  client-side before asking the server, so a guest's very first
+  page load always includes one legitimate 401).
+- ⬜ Not done this phase (explicitly out of scope per the phase brief):
+  new ML models, OAuth, image generation, advanced analytics, vector
+  database migration.
 
-## Phase 10 — Collection & Achievements
-- ⬜ Favorite/unfavorite/delete/search/filter/sort
-- ⬜ Achievement unlock logic + unlock animation
+## Phase 10 — Collection & Achievements (substantially delivered in Phase 9)
+- ✅ Favorite/unfavorite/search/filter/sort — built as part of Phase 9's
+  collection endpoint rather than deferred, since the spec asked for
+  the persistent collection and its favorites in the same phase.
+- ✅ Achievement unlock logic — compute-on-read against real stats,
+  5 achievements, DB-persisted unlock events.
+- ⬜ Delete (remove a cat from your collection) — not built; no
+  explicit requirement for it in Phase 9's brief, and deleting a
+  shared/public cat raises questions (cascade the story? the public
+  link?) worth deciding deliberately rather than bolting on.
+- ⬜ Achievement *unlock animation* — achievements unlock for real and
+  show an "Unlocked" badge on the profile page, but there's no
+  celebratory in-the-moment animation when one newly unlocks (the
+  compute-on-read design means unlocks are only discovered on the next
+  profile/achievements fetch, not pushed live at the moment of the
+  qualifying action).
 
 ## Phase 11 — Similarity Search
 - ⬜ Embedding generation + FAISS index
@@ -440,17 +550,20 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 
 ---
 
-## MVP Definition (target: end of Phase 8)
+## MVP Definition — reached as of Phase 9 ✅
 
 Landing → upload → validate → detect/classify (real or explicit demo
 mode) → fur color → AI profile → AI story → animated results page →
-save + revisit history. Everything through "animated results page" is
-done as of Phase 8 (the cinematic reveal + Cat Card). "Save + revisit
-history" is the one MVP item still outstanding — Phase 8's "Save"
-button only bookmarks locally (no page to browse those bookmarks yet);
-real history requires Phase 9's persistence-with-auth. Collection,
-achievements, similarity, Grad-CAM, and (most) creative generation
-remain explicitly post-MVP (Phases 9–13).
+save + revisit history. Every item in that chain is real and verified
+as of Phase 9: "save + revisit history" was the one outstanding piece
+(Phase 8's "Save" only bookmarked locally, with no page to browse
+those bookmarks) and Phase 9 delivered the real, authenticated version
+— an account, a persistent per-user collection, and real history.
+Similarity search, Grad-CAM, and (most) creative generation remain
+explicitly post-MVP (Phases 11–13); collection/achievements (Phase 10)
+turned out to be substantially delivered alongside Phase 9 rather than
+after it, since the spec bundled them into the same "persistent
+collection" ask.
 
 ## Known Risks
 - No Anthropic API key is configured on this dev machine — real
@@ -479,6 +592,19 @@ remain explicitly post-MVP (Phases 9–13).
   `config.py`'s default all agree on 5433; CI's ephemeral Postgres
   container has no such conflict and stays on 5432 — see
   `.github/workflows/ci.yml`.
-- Rate limiting is in-memory, single-process (unchanged since Phase 6)
-  — fine pre-auth/single-instance, needs a shared store (Redis) for
-  multi-instance production (Phase 9+ follow-up).
+- Rate limiting is in-memory, single-process — now behind a
+  `RateLimiter` protocol (Phase 9) specifically so a Redis-backed
+  implementation is a drop-in swap for multi-instance production,
+  which is still a follow-up, not done yet.
+- **No password reset / email verification flow** (Phase 9) — accounts
+  are created and authenticated, but there's no "forgot password"
+  endpoint and no confirmation email is ever sent (no email-sending
+  infrastructure exists at all yet). A user who forgets their password
+  has no self-service recovery path today.
+- **Local image storage doesn't survive a container rebuild** (Phase 9)
+  — `LocalImageStorageProvider` writes to `backend/uploads/` on the
+  local filesystem, gitignored and not part of any Docker volume
+  mount. Real for local dev (the collection page genuinely shows the
+  saved photo), but a production deployment needs the planned
+  S3-compatible `ImageStorageProvider` implementation before photos
+  can survive redeploys.

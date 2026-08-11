@@ -13,9 +13,18 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://meowverse:meowverse@localhost:5433/meowverse"
     redis_url: str = "redis://localhost:6379/0"
 
-    jwt_secret: str = "change-me-in-.env"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24 * 7
+    # --- Auth (Phase 9) ---
+    # DB-backed opaque session tokens in an httpOnly cookie, not JWT —
+    # see ARCHITECTURE.md's auth section for the full rationale. Only
+    # the *hash* of the token is stored server-side (same principle as
+    # password hashing: a DB leak shouldn't hand over usable sessions).
+    session_cookie_name: str = "meowverse_session"
+    session_expire_days: int = 30
+    # True in production (HTTPS-only cookie); false in local dev over
+    # plain http://localhost. Distinct from `debug` on purpose — a
+    # future prod deployment could conceivably want debug=false while
+    # still being on http during a first manual smoke test.
+    session_cookie_secure: bool = False
 
     # Generative AI providers — absent keys mean the app falls back to
     # NullProvider implementations rather than failing.
@@ -37,16 +46,30 @@ class Settings(BaseSettings):
 
     max_upload_size_mb: int = 10
 
-    # Applied to POST /api/v1/analyses (the only endpoint that can call
-    # a paid external API) via app/core/rate_limit.py. In-memory,
-    # per-process, per-client-IP — fine for a pre-auth single-instance
-    # deployment; revisit with a shared store once Phase 9 adds auth.
+    # Applied to POST /api/v1/analyses and the story endpoint (both can
+    # call a paid external API) via app/core/rate_limit.py.
     rate_limit_per_minute: int = 20
+    # Tighter limit for register/login specifically — brute-forcing
+    # passwords or spamming account creation is a different threat
+    # model than "don't hammer the AI endpoints." Per-IP, same as above.
+    auth_rate_limit_per_minute: int = 10
+    # In-memory, per-process, per-client-IP — fine for a single-instance
+    # deployment. `app/core/rate_limit.py` is written behind a small
+    # RateLimiter interface specifically so a Redis-backed
+    # implementation can be swapped in later without touching call
+    # sites, for when multi-instance deployment is on the table.
+    rate_limit_backend: str = "memory"
 
     # Breed classifier weights/class list. If either file is missing, the
     # pipeline runs in demo mode instead of failing — see app/ml/breed_classifier.py.
     breed_classifier_weights_path: str = "ml/models/breed_classifier.pt"
     breed_classifier_class_names_path: str = "ml/models/class_names.json"
+
+    # --- Image storage (Phase 9) ---
+    # Behind ImageStorageProvider (app/storage/) so a future S3-compatible
+    # backend is a drop-in swap — see app/storage/base.py.
+    image_storage_provider: str = "local"
+    image_storage_dir: str = "uploads"
 
 
 @lru_cache

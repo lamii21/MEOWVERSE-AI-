@@ -1,6 +1,7 @@
 import hashlib
 import io
 import logging
+import uuid
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.repositories.analysis_repository import save_analysis
 from app.schemas.analysis import AnalysisResult, BreedPrediction, ColorSwatch
 from app.schemas.profile import CatSignals
 from app.services.profile_service import generate_cat_profile
+from app.storage import get_image_storage
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,28 @@ def _demo_palette(image_bytes: bytes) -> list[ColorSwatch]:
     return [ColorSwatch(name=name, hex=hex_, percentage=pct) for name, hex_, pct in palette]
 
 
-async def analyze_image(image_bytes: bytes, db: AsyncSession) -> AnalysisResult:
+async def _try_store_image(image_bytes: bytes, content_type: str) -> str | None:
+    """Best-effort, same philosophy as analysis persistence below: a
+    storage failure (unwritable disk, future network storage outage)
+    must never fail the analyze request — it only means the photo won't
+    survive a refresh, which is honestly reflected by `image_url` being
+    `None` rather than the request failing."""
+    try:
+        storage = get_image_storage()
+        if not storage.is_available:
+            return None
+        return await storage.save(image_bytes, key=str(uuid.uuid4()), content_type=content_type)
+    except Exception:
+        logger.warning("Failed to persist cat photo — continuing without image_url", exc_info=True)
+        return None
+
+
+async def analyze_image(
+    image_bytes: bytes,
+    content_type: str,
+    db: AsyncSession,
+    user_id: uuid.UUID | None = None,
+) -> AnalysisResult:
     """Runs the real breed classifier and fur-color analyzer when each is
     available (falling back to clearly-labeled deterministic demo
     results otherwise — the two are independent, one can be real while
@@ -80,6 +103,13 @@ async def analyze_image(image_bytes: bytes, db: AsyncSession) -> AnalysisResult:
     rather than failing the whole request — the analyze/breed/color/
     profile pipeline must not become hard-dependent on the database
     just because story generation now wants one.
+
+    Phase 9: if `user_id` is provided (the request carried a valid
+    session), the analysis is auto-owned by that user immediately — no
+    separate "Save" step needed, matching the spec's "authenticated
+    analyses should be persisted reliably" requirement. A guest
+    (`user_id=None`) gets an unowned row that stays invisible to
+    everyone until explicitly claimed later via POST .../save.
     """
     image = _load_and_validate_image(image_bytes)
 
@@ -119,9 +149,14 @@ async def analyze_image(image_bytes: bytes, db: AsyncSession) -> AnalysisResult:
         profile_mode=profile_mode,
     )
 
+    image_url = await _try_store_image(image_bytes, content_type)
+
     try:
-        row = await save_analysis(db, result)
+        row = await save_analysis(db, result, user_id=user_id, image_url=image_url)
         result.id = row.id
+        result.owned = row.user_id is not None
+        result.image_url = row.image_url
+        result.is_favorite = row.is_favorite
     except Exception:
         # Deliberately broad: this is a best-effort side channel, not the
         # core pipeline. A DB outage can surface as many exception types

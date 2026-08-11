@@ -140,13 +140,19 @@ def test_nonexistent_cat_returns_404(client):
     assert client.get(f"/api/v1/analyses/{fake_id}").status_code == 404
 
 
-def test_sharing_a_cat_makes_it_publicly_accessible(client):
+def test_sharing_a_cat_makes_it_publicly_accessible(client, register_user):
+    # Phase 9: sharing now requires the caller to own the cat — see
+    # tests/test_ownership.py for the full ownership-enforcement suite;
+    # this test just confirms the pre-existing Phase 8 share→public
+    # behavior still works end to end for an owner.
+    register_user()
     analysis_id = _create_analysis(client)
 
     share_response = client.post(f"/api/v1/analyses/{analysis_id}/share")
     assert share_response.status_code == 200
     assert share_response.json()["is_public"] is True
 
+    client.post("/api/v1/auth/logout")
     public_response = client.get(f"/api/v1/analyses/{analysis_id}")
     assert public_response.status_code == 200
     assert public_response.json()["id"] == analysis_id
@@ -154,7 +160,8 @@ def test_sharing_a_cat_makes_it_publicly_accessible(client):
     assert public_response.json()["breed"]["label"]
 
 
-def test_sharing_a_cat_is_idempotent(client):
+def test_sharing_a_cat_is_idempotent(client, register_user):
+    register_user()
     analysis_id = _create_analysis(client)
 
     first = client.post(f"/api/v1/analyses/{analysis_id}/share")
@@ -166,6 +173,12 @@ def test_sharing_a_cat_is_idempotent(client):
     assert second.json()["is_public"] is True
 
 
-def test_sharing_a_nonexistent_cat_returns_404(client):
+def test_sharing_a_nonexistent_cat_returns_404(client, register_user):
+    register_user()
     fake_id = "00000000-0000-0000-0000-000000000000"
     assert client.post(f"/api/v1/analyses/{fake_id}/share").status_code == 404
+
+
+def test_sharing_without_authentication_returns_401(client):
+    analysis_id = _create_analysis(client)
+    assert client.post(f"/api/v1/analyses/{analysis_id}/share").status_code == 401

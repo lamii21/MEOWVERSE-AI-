@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -85,6 +86,31 @@ async def _fresh_app_engine_pool():
     """
     await app_engine.dispose()
     yield
+
+
+@pytest.fixture
+def register_user(client):
+    """Registers a fresh user (unique email per call, so parallel/repeat
+    local test runs against the accumulating dev DB never collide) via
+    the real /api/v1/auth/register endpoint, and — since `client`'s
+    underlying httpx client keeps a cookie jar for its whole fixture
+    lifetime — leaves that same `client` authenticated as this user for
+    the rest of the test. Returns the registered user's JSON body plus
+    the credentials, for tests that also want to exercise /login.
+    """
+
+    def _register(display_name: str = "Test User", password: str = "testpass123") -> dict:
+        email = f"test-{uuid.uuid4().hex[:12]}@example.com"
+        response = client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": password, "display_name": display_name},
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        body["_password"] = password
+        return body
+
+    return _register
 
 
 @pytest.fixture(autouse=True)

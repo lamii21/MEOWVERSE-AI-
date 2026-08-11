@@ -2,12 +2,23 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { toPng } from "html-to-image";
-import { Bookmark, Check, Download, ImagePlus, Link2, Loader2, Sparkles } from "lucide-react";
+import {
+  Bookmark,
+  Check,
+  Download,
+  Heart,
+  ImagePlus,
+  Link2,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 import { useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { GuestSavePrompt } from "@/features/auth/components/GuestSavePrompt";
+import { resolveMediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { shareAnalysis } from "@/services/analyses";
 
@@ -16,7 +27,7 @@ import { ConfidenceMeter } from "./ConfidenceMeter";
 import { RarityAura } from "./RarityAura";
 import { getRarityVisual } from "../rarity";
 import { useCardTilt } from "../use-card-tilt";
-import { useSavedCat } from "../use-saved-cat";
+import { useCatActions } from "../use-cat-actions";
 
 import type { AnalysisResult } from "@/types/analysis";
 
@@ -35,24 +46,41 @@ interface CatCardProps {
 }
 
 export function CatCard({
-  result,
+  result: initialResult,
   catImageUrl,
   interactive = true,
   storySectionId = "story-section",
 }: CatCardProps) {
+  const {
+    result,
+    isGuest,
+    showGuestPrompt,
+    setShowGuestPrompt,
+    handleSaveClick,
+    handleToggleFavoriteClick,
+    isSaving,
+    isTogglingFavorite,
+  } = useCatActions(initialResult);
   const { profile } = result;
+  // A fresh analysis passes its local blob: preview URL explicitly;
+  // any other view (collection, public /cat/[id]) has no such prop, so
+  // fall back to the persisted photo from ImageStorageProvider (Phase 9).
+  const displayImageUrl = catImageUrl ?? resolveMediaUrl(result.image_url);
   const rarity = getRarityVisual(profile.rarity);
   const reduceMotion = useReducedMotion();
   const tiltRef = useRef<HTMLDivElement>(null);
   const tilt = useCardTilt(tiltRef, interactive);
   const exportRef = useRef<HTMLDivElement>(null);
 
-  const [isSaved, toggleSaved] = useSavedCat(result.id);
   const [shareState, setShareState] = useState<"idle" | "sharing" | "copied" | "error">("idle");
   const [downloadState, setDownloadState] = useState<"idle" | "exporting" | "error">("idle");
 
   async function handleShare() {
-    if (!result.id) return;
+    if (isGuest) {
+      setShowGuestPrompt(true);
+      return;
+    }
+    if (!result.id || !result.owned) return;
     setShareState("sharing");
     try {
       await shareAnalysis(result.id);
@@ -139,12 +167,16 @@ export function CatCard({
           </div>
 
           <div className="mx-auto mt-4 flex aspect-square w-40 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-magic-200 to-peach-200 text-5xl dark:from-magic-900/60 dark:to-peach-900/40">
-            {catImageUrl ? (
-              // Card export needs a plain <img> (same-origin blob: URL) —
-              // next/image's runtime optimization endpoint would break
-              // html-to-image's DOM snapshot.
+            {displayImageUrl ? (
+              // Card export needs a plain <img>, not next/image's
+              // runtime-optimized one (which would break html-to-image's
+              // DOM snapshot). The src is either a same-origin blob: URL
+              // (fresh analysis) or the backend's /media/... URL (any
+              // other view) — the latter relies on the backend's CORS
+              // config allowing the frontend origin, same as every other
+              // API call.
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={catImageUrl} alt="" className="size-full object-cover" />
+              <img src={displayImageUrl} alt="" className="size-full object-cover" />
             ) : (
               <span aria-hidden="true">🐱</span>
             )}
@@ -190,15 +222,41 @@ export function CatCard({
       </motion.div>
 
       <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-        <Button variant="ghost" size="sm" onClick={toggleSaved} aria-pressed={isSaved} className="gap-1.5">
-          <Bookmark className={cn("size-4", isSaved && "fill-magic-500 text-magic-500")} aria-hidden="true" />
-          {isSaved ? "Saved" : "Save"}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleSaveClick}
+          disabled={result.owned || isSaving}
+          aria-pressed={result.owned}
+          className="gap-1.5"
+        >
+          <Bookmark
+            className={cn("size-4", result.owned && "fill-magic-500 text-magic-500")}
+            aria-hidden="true"
+          />
+          {result.owned ? "Saved" : isSaving ? "Saving..." : "Save"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleToggleFavoriteClick}
+          disabled={(!isGuest && !result.owned) || isTogglingFavorite}
+          aria-pressed={result.is_favorite}
+          title={!isGuest && !result.owned ? "Save this cat first" : undefined}
+          className="gap-1.5"
+        >
+          <Heart
+            className={cn("size-4", result.is_favorite && "fill-destructive text-destructive")}
+            aria-hidden="true"
+          />
+          {result.is_favorite ? "Favorited" : "Favorite"}
         </Button>
         <Button
           variant="ghost"
           size="sm"
           onClick={handleShare}
-          disabled={!result.id || shareState === "sharing"}
+          disabled={!result.id || shareState === "sharing" || (!isGuest && !result.owned)}
+          title={!isGuest && !result.owned ? "Save this cat first" : undefined}
           className="gap-1.5"
         >
           {shareState === "copied" ? (
@@ -243,6 +301,8 @@ export function CatCard({
           Wallpaper
         </Button>
       </div>
+
+      <GuestSavePrompt open={showGuestPrompt} onOpenChange={setShowGuestPrompt} />
     </div>
   );
 }

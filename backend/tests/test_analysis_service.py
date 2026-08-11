@@ -44,7 +44,7 @@ async def test_both_fall_back_to_demo_when_unavailable(
     mock_get_colors.return_value = _FakeUnavailableModel()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), db_session)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", db_session)
 
     assert result.breed_mode == "demo"
     assert result.colors_mode == "demo"
@@ -68,7 +68,7 @@ async def test_breed_real_colors_demo_are_independent(
     mock_get_colors.return_value = _FakeUnavailableModel()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), db_session)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", db_session)
 
     assert result.breed_mode == "trained"
     assert result.breed == BreedPrediction(label="Bengal", confidence=0.97)
@@ -87,7 +87,7 @@ async def test_colors_real_breed_demo_are_independent(
     mock_get_colors.return_value = _FakeTrainedColorAnalyzer()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), db_session)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", db_session)
 
     assert result.breed_mode == "demo"
     assert result.breed.label
@@ -106,7 +106,7 @@ async def test_both_cv_signals_real_when_both_available(
     mock_get_colors.return_value = _FakeTrainedColorAnalyzer()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), db_session)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", db_session)
 
     assert result.breed_mode == "trained"
     assert result.colors_mode == "trained"
@@ -127,7 +127,7 @@ async def test_profile_never_overwrites_real_cv_signals(
     mock_get_colors.return_value = _FakeTrainedColorAnalyzer()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), db_session)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", db_session)
 
     assert result.breed == BreedPrediction(label="Bengal", confidence=0.97)
     assert result.colors == [ColorSwatch(name="cobalt", hex="#123456", percentage=100.0)]
@@ -148,7 +148,7 @@ async def test_result_is_persisted_and_gets_a_real_id(
     mock_get_colors.return_value = _FakeTrainedColorAnalyzer()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), db_session)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", db_session)
 
     assert result.id is not None
     assert isinstance(result.id, uuid.UUID)
@@ -176,7 +176,7 @@ async def test_analysis_still_succeeds_when_db_is_unavailable(
     mock_get_colors.return_value = _FakeTrainedColorAnalyzer()
     mock_get_llm.return_value = _FakeUnavailableModel()
 
-    result = await analyze_image(_make_jpeg_bytes(), None)
+    result = await analyze_image(_make_jpeg_bytes(), "image/jpeg", None)
 
     assert result.id is None
     assert result.breed == BreedPrediction(label="Bengal", confidence=0.97)
