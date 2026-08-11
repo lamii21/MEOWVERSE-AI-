@@ -1,0 +1,27 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# Alembic's own revision template generates code we don't hand-format
+# (Union[...] instead of X | Y, long single-line column defs, etc.) —
+# lint the migrations directory for correctness elsewhere, not style.
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# "session" (not "function"): app/core/database.py's async engine +
+# connection pool is created once at module-import time. asyncpg
+# connections are bound to the event loop that created them and can't
+# be reused across loops — with per-function loop scope, a pooled
+# connection opened under one test's loop would blow up on the next
+# test with "another operation is in progress" (a real bug hit and
+# fixed in Phase 7 when DB-backed tests were added). A single
+# session-scoped loop matches the engine's actual lifetime.
+asyncio_default_fixture_loop_scope = "session"

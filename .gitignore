@@ -1,0 +1,43 @@
+# --- Node / Frontend ---
+node_modules/
+.next/
+out/
+frontend/.env
+frontend/.env.local
+frontend/.env*.local
+*.tsbuildinfo
+.pnpm-store/
+
+# --- Python / Backend ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+backend/.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# --- ML artifacts ---
+backend/ml/models/*.pt
+backend/ml/models/*.pth
+backend/ml/models/*.onnx
+backend/ml/dataset/raw/
+backend/ml/dataset/processed/
+mlruns/
+
+# --- Docker / OS / Editor ---
+docker-compose.override.yml
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+!*.env.example

@@ -1,0 +1,16 @@
+# Heavier ML dependencies, kept separate so the API can run without them
+# during early development (pipeline falls back to demo mode).
+#
+# CPU-only builds, chosen over CUDA wheels because the CUDA-bundled wheel
+# is ~2.8GB (bundles cuDNN/cuBLAS) vs ~200MB for CPU — impractical on a
+# slow connection, and unnecessary for this dataset size/model. If a fast
+# connection + matching driver are available, swap for the cu118 index
+# instead (broadly driver-compatible via NVIDIA's backward compat):
+#   pip install torch==2.7.1+cu118 torchvision==0.22.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+torch==2.7.1
+torchvision==0.22.1
+scikit-learn==1.7.2
+opencv-python-headless==4.12.0.88  # grad-cam transitively pulls full opencv-python too (GUI libs); both share the `cv2` package, harmless but redundant
+numpy==2.2.6
+faiss-cpu==1.9.0.post1
+grad-cam==1.5.5
