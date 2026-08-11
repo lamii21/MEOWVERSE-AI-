@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Quicksand } from "next/font/google";
 import "./globals.css";
 
 import { AppNavbar } from "@/features/auth/components/AppNavbar";
+import { DiscoveryToastHost } from "@/features/gamification/components/DiscoveryToastHost";
 
 import { Providers } from "./providers";
 
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <Providers>
           <AppNavbar />
+          <DiscoveryToastHost />
           {children}
         </Providers>
       </body>

@@ -15,10 +15,19 @@ export function AuthCard({
 
   return (
     <div className="mx-auto flex w-full max-w-sm flex-1 flex-col items-center justify-center px-4 py-16">
+      {/* `initial` deliberately never depends on `reduceMotion`: framer's
+       * `motion.div` renders `initial` as a real inline style during SSR,
+       * so conditioning it on a client-only value (`useReducedMotion()`)
+       * causes the client's very first render to disagree with the
+       * server-rendered HTML — a genuine hydration mismatch, found via
+       * Playwright with `reducedMotion: "reduce"`. Gating only the
+       * transition duration keeps `initial`/`animate` identical between
+       * server and client while still making the motion instant (no
+       * visible animation) when reduced motion is preferred. */}
       <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: reduceMotion ? 0 : 0.4 }}
         className="glass w-full rounded-3xl p-8"
       >
         <div className="mb-6 text-center">

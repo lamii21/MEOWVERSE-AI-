@@ -1,6 +1,6 @@
 "use client";
 
-import { Heart } from "lucide-react";
+import { BookOpen, Heart } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,10 @@ import { resolveMediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 
 import type { AnalysisResult } from "@/types/analysis";
+
+function formatDiscoveryDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 /**
  * A compact gallery tile — the full CatCard (stats, palette, action
@@ -28,12 +32,14 @@ export function CollectionCard({ result }: { result: AnalysisResult }) {
         rarity.cardClassName,
       )}
     >
-      {result.is_favorite && (
-        <Heart
-          className="absolute right-3 top-3 size-4 fill-destructive text-destructive"
-          aria-label="Favorited"
-        />
-      )}
+      <div className="absolute right-3 top-3 flex items-center gap-1">
+        {result.has_story && (
+          <BookOpen className="size-3.5 text-muted-foreground" aria-label="Has a story" />
+        )}
+        {result.is_favorite && (
+          <Heart className="size-4 fill-destructive text-destructive" aria-label="Favorited" />
+        )}
+      </div>
       <div className="mx-auto flex aspect-square w-full max-w-28 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-magic-200 to-peach-200 text-3xl dark:from-magic-900/60 dark:to-peach-900/40">
         {result.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -55,6 +61,11 @@ export function CollectionCard({ result }: { result: AnalysisResult }) {
       <Badge className={cn("mx-auto mt-2 gap-1", rarity.badgeClassName)}>
         {result.profile.rarity}
       </Badge>
+      {result.created_at && (
+        <p className="mt-1 text-center text-[10px] text-muted-foreground">
+          Discovered {formatDiscoveryDate(result.created_at)}
+        </p>
+      )}
     </Link>
   );
 }

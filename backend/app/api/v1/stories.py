@@ -8,19 +8,22 @@ from app.core.csrf import verify_same_origin
 from app.core.database import get_db
 from app.core.rate_limit import enforce_rate_limit
 from app.models.user import UserModel
+from app.repositories.analysis_repository import get_analysis
 from app.repositories.story_repository import (
     get_owned_story,
     get_public_story,
     set_private,
     set_public,
 )
+from app.schemas.gamification import GamificationEvent
 from app.schemas.story import CatStory, StoryRequest, StoryResponse, StoryStyle
+from app.services.gamification import process_event
 from app.services.story_service import AnalysisNotFoundError, get_or_generate_story
 
 router = APIRouter(tags=["stories"])
 
 
-def _to_response(row) -> StoryResponse:
+def _to_response(row, *, gamification: GamificationEvent | None = None) -> StoryResponse:
     return StoryResponse(
         id=row.id,
         analysis_id=row.analysis_id,
@@ -30,6 +33,7 @@ def _to_response(row) -> StoryResponse:
         provider=row.provider,
         is_public=row.is_public,
         created_at=row.created_at,
+        gamification=gamification,
     )
 
 
@@ -42,20 +46,35 @@ async def create_story(
     analysis_id: uuid.UUID,
     body: StoryRequest = Body(default_factory=StoryRequest),  # noqa: B008
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: UserModel | None = Depends(get_current_user_optional),  # noqa: B008
 ) -> StoryResponse:
     """Returns the existing story for (analysis_id, style) unless
     `regenerate: true` is explicitly requested — see
     app/services/story_service.py for the cost-control contract.
 
     Guest-accessible on purpose (Phase 9 spec §7) — story generation
-    doesn't require auth, same as analysis creation.
+    doesn't require auth, same as analysis creation. Phase 10: XP is
+    only granted when the caller is authenticated *and* owns the
+    analysis — generating a story for a cat that isn't yours (this
+    endpoint has always allowed that, since the id isn't enumerable)
+    still works, it just never grants XP or counts toward Storyteller.
     """
     try:
         row = await get_or_generate_story(db, analysis_id, body.style, body.regenerate)
     except AnalysisNotFoundError as exc:
         raise HTTPException(status_code=404, detail="No analysis found with that id.") from exc
 
-    return _to_response(row)
+    gamification = None
+    if user is not None:
+        analysis_row = await get_analysis(db, analysis_id)
+        if analysis_row is not None and analysis_row.user_id == user.id:
+            # Keyed on analysis_id, not story_id: the first story ever
+            # generated for a given cat grants XP once, regardless of
+            # style or how many times "Regenerate" is clicked after —
+            # see CollectionEventModel's docstring.
+            gamification = await process_event(db, user.id, "STORY_GENERATED", analysis_id)
+
+    return _to_response(row, gamification=gamification)
 
 
 @router.get("/api/v1/stories/{story_id}", response_model=StoryResponse)

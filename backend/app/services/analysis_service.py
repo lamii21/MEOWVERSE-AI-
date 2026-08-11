@@ -157,6 +157,7 @@ async def analyze_image(
         result.owned = row.user_id is not None
         result.image_url = row.image_url
         result.is_favorite = row.is_favorite
+        result.created_at = row.created_at
     except Exception:
         # Deliberately broad: this is a best-effort side channel, not the
         # core pipeline. A DB outage can surface as many exception types

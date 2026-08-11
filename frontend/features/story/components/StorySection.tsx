@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { pushGamificationEvent } from "@/lib/discovery-toast-store";
 import { generateStory, shareStory, StoryApiError } from "@/services/stories";
 
 import { StoryCard } from "./StoryCard";
@@ -40,6 +41,7 @@ export function StorySection({ analysisId, catImageUrl }: StorySectionProps) {
       .then((result) => {
         setStory(result);
         setStatus("success");
+        pushGamificationEvent(result.gamification);
       })
       .catch((err: unknown) => {
         setError(

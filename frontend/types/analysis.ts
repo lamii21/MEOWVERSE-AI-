@@ -1,3 +1,5 @@
+import type { GamificationEvent } from "@/types/gamification";
+
 export interface BreedPrediction {
   label: string;
   confidence: number;
@@ -59,4 +61,9 @@ export interface AnalysisResult {
   owned: boolean;
   is_favorite: boolean;
   image_url: string | null;
+  /** Phase 10: only set on responses from an action that itself
+   * triggers a gamification event — a plain GET never carries one. */
+  gamification: GamificationEvent | null;
+  created_at: string | null;
+  has_story: boolean;
 }

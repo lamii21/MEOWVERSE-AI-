@@ -1,3 +1,5 @@
+import type { GamificationEvent } from "@/types/gamification";
+
 export type StoryStyle =
   | "magical_adventure"
   | "cozy_wholesome"
@@ -75,4 +77,5 @@ export interface StoryResponse {
   provider: string;
   is_public: boolean;
   created_at: string;
+  gamification: GamificationEvent | null;
 }

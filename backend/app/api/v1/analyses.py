@@ -14,28 +14,57 @@ from app.repositories.analysis_repository import (
     get_analysis,
     get_owned_analysis,
     get_public_analysis,
+    is_first_of_breed,
+    is_first_of_rarity,
     set_favorite,
     set_private,
     set_public,
 )
+from app.repositories.story_repository import has_any_story
 from app.schemas.analysis import AnalysisResult, BreedPrediction
 from app.schemas.common import ColorSwatch
+from app.schemas.gamification import GamificationEvent
 from app.schemas.profile import CatProfile
 from app.services.analysis_service import InvalidImageError, analyze_image
+from app.services.gamification import process_event
 
 router = APIRouter(prefix="/api/v1/analyses", tags=["analyses"])
 
 ACCEPTED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
-def analysis_row_to_result(row, *, viewer_is_owner: bool) -> AnalysisResult:
+async def _record_discovery(db: AsyncSession, user_id: uuid.UUID, row) -> GamificationEvent:
+    """Shared by create_analysis (auto-owned) and save_cat (claimed):
+    the moment an analysis first enters a user's collection is exactly
+    the CAT_DISCOVERED event (Phase 10 spec §13), whichever of the two
+    paths got it there. `is_first_of_breed`/`is_first_of_rarity` are
+    computed *before* the event is recorded so "have I seen this breed
+    before" correctly excludes the row currently being discovered."""
+    is_new_breed = await is_first_of_breed(db, user_id, row.breed_label, row.id)
+    is_new_rarity = await is_first_of_rarity(db, user_id, row.rarity, row.id)
+    return await process_event(
+        db,
+        user_id,
+        "CAT_DISCOVERED",
+        row.id,
+        is_new_breed=is_new_breed,
+        is_new_rarity=is_new_rarity,
+    )
+
+
+def analysis_row_to_result(
+    row, *, viewer_is_owner: bool, has_story: bool = False
+) -> AnalysisResult:
     """`viewer_is_owner` is a required, explicit kwarg (no default) on
     purpose — every call site has to state which case it's in. `owned`
     and `is_favorite` are owner-only signals: a public /cat/[id] viewer
     must never learn whether (or by whom) a cat is favorited, or see an
     "owned" flag that a careless frontend could render as if it were
     *their own* — see Phase 9 spec §18, "public pages should expose
-    only intended public information."
+    only intended public information." `has_story` defaults to False
+    (rather than being required) because most call sites here create a
+    row that provably has no story yet; sites where it might already
+    exist look it up explicitly and pass the real value.
     """
     return AnalysisResult(
         id=row.id,
@@ -51,6 +80,8 @@ def analysis_row_to_result(row, *, viewer_is_owner: bool) -> AnalysisResult:
         owned=viewer_is_owner,
         is_favorite=row.is_favorite if viewer_is_owner else False,
         image_url=row.image_url,
+        created_at=row.created_at,
+        has_story=has_story,
     )
 
 
@@ -82,11 +113,17 @@ async def create_analysis(
         )
 
     try:
-        return await analyze_image(
+        result = await analyze_image(
             image_bytes, file.content_type, db, user_id=user.id if user else None
         )
     except InvalidImageError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if user is not None and result.id is not None:
+        row = await get_owned_analysis(db, result.id, user.id)
+        if row is not None:
+            result.gamification = await _record_discovery(db, user.id, row)
+    return result
 
 
 @router.get("/{analysis_id}", response_model=AnalysisResult)
@@ -103,12 +140,16 @@ async def get_cat(
     """
     row = await get_public_analysis(db, analysis_id)
     if row is not None:
-        return analysis_row_to_result(row, viewer_is_owner=False)
+        return analysis_row_to_result(
+            row, viewer_is_owner=False, has_story=await has_any_story(db, row.id)
+        )
 
     if user is not None:
         row = await get_owned_analysis(db, analysis_id, user.id)
         if row is not None:
-            return analysis_row_to_result(row, viewer_is_owner=True)
+            return analysis_row_to_result(
+                row, viewer_is_owner=True, has_story=await has_any_story(db, row.id)
+            )
 
     raise HTTPException(status_code=404, detail="Cat not found.")
 
@@ -135,7 +176,11 @@ async def save_cat(
         if existing is None:
             raise HTTPException(status_code=404, detail="Cat not found.")
         raise HTTPException(status_code=409, detail="This cat has already been saved.")
-    return analysis_row_to_result(row, viewer_is_owner=True)
+    result = analysis_row_to_result(
+        row, viewer_is_owner=True, has_story=await has_any_story(db, row.id)
+    )
+    result.gamification = await _record_discovery(db, user.id, row)
+    return result
 
 
 @router.post(
@@ -151,7 +196,11 @@ async def favorite_cat(
     row = await set_favorite(db, analysis_id, user.id, True)
     if row is None:
         raise HTTPException(status_code=404, detail="Cat not found.")
-    return analysis_row_to_result(row, viewer_is_owner=True)
+    result = analysis_row_to_result(
+        row, viewer_is_owner=True, has_story=await has_any_story(db, row.id)
+    )
+    result.gamification = await process_event(db, user.id, "CAT_FAVORITED", row.id)
+    return result
 
 
 @router.post(
@@ -167,7 +216,9 @@ async def unfavorite_cat(
     row = await set_favorite(db, analysis_id, user.id, False)
     if row is None:
         raise HTTPException(status_code=404, detail="Cat not found.")
-    return analysis_row_to_result(row, viewer_is_owner=True)
+    return analysis_row_to_result(
+        row, viewer_is_owner=True, has_story=await has_any_story(db, row.id)
+    )
 
 
 @router.post(
@@ -189,7 +240,11 @@ async def share_cat(
     row = await set_public(db, analysis_id, user.id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cat not found.")
-    return analysis_row_to_result(row, viewer_is_owner=True)
+    result = analysis_row_to_result(
+        row, viewer_is_owner=True, has_story=await has_any_story(db, row.id)
+    )
+    result.gamification = await process_event(db, user.id, "CAT_SHARED", row.id)
+    return result
 
 
 @router.post(
@@ -205,4 +260,6 @@ async def unshare_cat(
     row = await set_private(db, analysis_id, user.id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cat not found.")
-    return analysis_row_to_result(row, viewer_is_owner=True)
+    return analysis_row_to_result(
+        row, viewer_is_owner=True, has_story=await has_any_story(db, row.id)
+    )

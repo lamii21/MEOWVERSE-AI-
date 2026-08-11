@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, Menu, Trophy, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -17,6 +17,7 @@ const AUTHED_LINKS = [
   { href: "/", label: "Home" },
   { href: "/discover", label: "Discover" },
   { href: "/collection", label: "My Cats" },
+  { href: "/achievements", label: "Achievements" },
   { href: "/profile", label: "Profile" },
 ];
 
@@ -95,17 +96,6 @@ export function AppNavbar() {
                 variant="ghost"
                 size="icon-sm"
                 className="hidden sm:inline-flex"
-                title="Achievements"
-                nativeButton={false}
-                render={<Link href="/profile#achievements" />}
-              >
-                <Trophy className="size-4" aria-hidden="true" />
-                <span className="sr-only">Achievements</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="hidden sm:inline-flex"
                 onClick={handleLogout}
                 disabled={logout.isPending}
                 title="Log out"
@@ -170,13 +160,6 @@ export function AppNavbar() {
 
           {status === "authenticated" && user && (
             <>
-              <Link
-                href="/profile#achievements"
-                className="rounded-lg px-3 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Achievements
-              </Link>
               <button
                 type="button"
                 className="rounded-lg px-3 py-2 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

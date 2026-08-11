@@ -93,6 +93,40 @@ async def count_user_stories(db: AsyncSession, user_id: uuid.UUID) -> int:
     return result.scalar_one()
 
 
+async def has_any_story(db: AsyncSession, analysis_id: uuid.UUID) -> bool:
+    stmt = select(func.count(StoryModel.id)).where(StoryModel.analysis_id == analysis_id)
+    return (await db.execute(stmt)).scalar_one() > 0
+
+
+async def get_analysis_ids_with_stories(
+    db: AsyncSession, analysis_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Batched version of `has_any_story` for a page of results — one
+    query for the whole page rather than one per row (Phase 10 spec
+    §27: avoid N+1 queries in the collection view)."""
+    if not analysis_ids:
+        return set()
+    stmt = (
+        select(StoryModel.analysis_id).where(StoryModel.analysis_id.in_(analysis_ids)).distinct()
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+async def has_story_of_style(db: AsyncSession, user_id: uuid.UUID, style: str) -> bool:
+    """Powers the Dream Keeper achievement (generate a Dreamy &
+    Emotional story) — a real query against the user's own stories,
+    joined through their owned analyses, never a client-asserted flag.
+    """
+    stmt = (
+        select(func.count(StoryModel.id))
+        .join(CatAnalysisModel, StoryModel.analysis_id == CatAnalysisModel.id)
+        .where(CatAnalysisModel.user_id == user_id, StoryModel.style == style)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one() > 0
+
+
 async def set_public(
     db: AsyncSession, story_id: uuid.UUID, user_id: uuid.UUID
 ) -> StoryModel | None:

@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { useAuth } from "@/hooks/use-auth";
+import { pushGamificationEvent } from "@/lib/discovery-toast-store";
 import { favoriteAnalysis, saveAnalysis, unfavoriteAnalysis } from "@/services/analyses";
 
 import type { AnalysisResult } from "@/types/analysis";
@@ -50,6 +51,7 @@ export function useCatActions(initial: AnalysisResult) {
     },
     onSuccess: (updated) => {
       setResult(updated);
+      pushGamificationEvent(updated.gamification);
       invalidateCollectionQueries();
     },
   });
@@ -69,6 +71,7 @@ export function useCatActions(initial: AnalysisResult) {
     },
     onSuccess: (updated) => {
       setResult(updated);
+      pushGamificationEvent(updated.gamification);
       invalidateCollectionQueries();
     },
   });

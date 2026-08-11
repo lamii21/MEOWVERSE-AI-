@@ -498,22 +498,54 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   new ML models, OAuth, image generation, advanced analytics, vector
   database migration.
 
-## Phase 10 — Collection & Achievements (substantially delivered in Phase 9)
-- ✅ Favorite/unfavorite/search/filter/sort — built as part of Phase 9's
-  collection endpoint rather than deferred, since the spec asked for
-  the persistent collection and its favorites in the same phase.
-- ✅ Achievement unlock logic — compute-on-read against real stats,
-  5 achievements, DB-persisted unlock events.
-- ⬜ Delete (remove a cat from your collection) — not built; no
-  explicit requirement for it in Phase 9's brief, and deleting a
-  shared/public cat raises questions (cascade the story? the public
-  link?) worth deciding deliberately rather than bolting on.
-- ⬜ Achievement *unlock animation* — achievements unlock for real and
-  show an "Unlocked" badge on the profile page, but there's no
-  celebratory in-the-moment animation when one newly unlocks (the
-  compute-on-read design means unlocks are only discovered on the next
-  profile/achievements fetch, not pushed live at the moment of the
-  qualifying action).
+## Phase 10 — MeowVerse Cat Universe: Collection, Gamification & Discovery ✅
+- ✅ "My Cat Universe" collection redesign — header, real stats summary
+  (total/favorites/stories/rare+/legendary+/completion%), extended
+  filters (rarity tiers, Favorites, Stories, Recently Discovered),
+  debounced search (name/breed/color), extended sort (newest/oldest/
+  name A-Z/name Z-A/rarity/breed/favorite), pagination.
+- ✅ Server-authoritative XP + leveling — 5 XP-awarding event types,
+  idempotent via a `collection_events` log (no client-trusted values,
+  no farming via repeat favorite/unfavorite or Regenerate spam), a
+  documented quadratic level curve capped at level 20. See
+  ARCHITECTURE.md §15.
+- ✅ Achievement engine extended to 9 (from Phase 9's 5) — Rare Hunter,
+  Dream Keeper, Storyteller, Cat Home added; existing keys relabeled
+  (never renamed at the DB level) to match this phase's naming. Real
+  progress bars (`progress_current`/`progress_target`) on locked ones.
+  See ARCHITECTURE.md §16.
+- ✅ Breed Explorer — the full canonical 12-breed universe
+  (`ml/models/class_names.json`), undiscovered breeds shown locked with
+  zero fabricated stats. Collection completion % defined and documented
+  precisely (unique canonical breeds / 12). See ARCHITECTURE.md §17.
+- ✅ MeowVerse Map — an original SVG/CSS/Framer-Motion constellation
+  view (no 3D engine), deterministic per-cat star positions, a simpler
+  list fallback below the `sm` breakpoint. See ARCHITECTURE.md §18.
+- ✅ Event-driven discovery toasts (new breed / new rarity / achievement
+  unlocked / level up) — never the same toast shown twice for the same
+  moment, queued one-at-a-time, reduced-motion-aware.
+- ✅ `/achievements` page (unlocked + locked-with-progress), `/profile`
+  upgraded (level/XP bar, 8 real stats, favorite cat preview).
+- ✅ Duplicate-cat handling defined and tested: total cats counts every
+  analysis; unique breeds/completion% never double-count a repeat
+  breed. See ARCHITECTURE.md §17 and `test_gamification.py`.
+- ✅ Backend: 170/170 tests (was 140), ruff clean. Frontend: 85/85 tests
+  (was 69), lint/build clean. Full 22-step Playwright E2E flow passing
+  against real dev servers, responsive QA at 320–1440px (zero
+  horizontal overflow), reduced-motion verified.
+- 🐛 Found and fixed during this phase's reduced-motion QA (not
+  hypothetical, not introduced this phase): `AuthCard.tsx` (Phase 9)
+  conditioned its Framer Motion `initial` prop on `useReducedMotion()`,
+  which is read differently between SSR and a client whose OS already
+  prefers reduced motion — a genuine hydration mismatch on `/login` and
+  `/register`'s first paint. Fixed by keeping `initial` constant and
+  only gating the transition `duration`, which is SSR-safe.
+- ⬜ Delete (remove a cat from your collection) — still not built; same
+  reasoning as Phase 9 (cascading a shared/public cat's story and link
+  deserves its own deliberate decision, not a bolt-on here either).
+- ⬜ Not done this phase (explicitly out of scope per the phase brief):
+  daily/recurring engagement mechanics, AI image generation, social
+  feed, chat, OAuth.
 
 ## Phase 11 — Similarity Search
 - ⬜ Embedding generation + FAISS index
@@ -560,10 +592,11 @@ as of Phase 9: "save + revisit history" was the one outstanding piece
 those bookmarks) and Phase 9 delivered the real, authenticated version
 — an account, a persistent per-user collection, and real history.
 Similarity search, Grad-CAM, and (most) creative generation remain
-explicitly post-MVP (Phases 11–13); collection/achievements (Phase 10)
-turned out to be substantially delivered alongside Phase 9 rather than
-after it, since the spec bundled them into the same "persistent
-collection" ask.
+explicitly post-MVP (Phases 11–13); collection/achievements got their
+first pass alongside Phase 9 (since the spec bundled a basic persistent
+collection into the same ask) and their full "Cat Universe" treatment
+— gamification, XP/levels, breed discovery, the constellation map —
+in Phase 10.
 
 ## Known Risks
 - No Anthropic API key is configured on this dev machine — real

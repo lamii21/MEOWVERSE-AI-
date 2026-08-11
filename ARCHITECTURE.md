@@ -598,3 +598,180 @@ frontend to receive even by accident.
    components.
 4. Every private-resource query is ownership-scoped at the query
    level, not checked after the fact in a route handler — see §12.
+
+## 15. Gamification & Progression (Phase 10)
+
+**XP is awarded exclusively server-side, keyed by real events, never
+trusted from the client** — the frontend never sends an XP value, only
+triggers actions (save, favorite, share, generate story) whose
+handlers call `app/services/gamification.py`'s `process_event`.
+
+**Anti-farming via an idempotent event log.** `collection_events`
+(`app/models/collection_event.py`) has a unique constraint on
+`(user_id, event_type, target_id)`. `process_event` inserts with
+`ON CONFLICT DO NOTHING` and only awards XP when the insert actually
+happened — so the same real-world moment can only ever pay out once,
+no matter how many times the underlying action repeats client-side:
+
+- **`CAT_FAVORITED`** is keyed on the analysis id — toggling
+  favorite/unfavorite/favorite again pays out exactly once, the first
+  time.
+- **`STORY_GENERATED`** is keyed on the *analysis* id, not the story
+  id — generating a story for a cat pays out once; clicking
+  Regenerate (which inserts a brand-new `StoryModel` row each time,
+  see `story_repository.save_story`) or picking a different style for
+  the same cat never pays out again. Without this, Regenerate would be
+  an infinite XP faucet.
+- **`CAT_DISCOVERED`** fires once per analysis, from whichever path
+  first gives it an owner — an authenticated `POST /api/v1/analyses`
+  (auto-owned) or a later `POST .../save` (claimed from a guest
+  upload). Same event either way; see §12's guest → owner flow.
+- **`CAT_SHARED`** is keyed on the analysis id, fired from
+  `POST /api/v1/analyses/{id}/share`; unsharing and re-sharing doesn't
+  re-pay.
+- **`ACHIEVEMENT_UNLOCKED`** is keyed on the achievement key, fired
+  from inside `process_event` itself the moment an achievement newly
+  qualifies (see §16) — so unlocking never needs a separate XP grant
+  call, and (being append-only-unique same as every other event type)
+  can never double-pay even under a race.
+
+**XP values and the level curve** live in
+`app/services/progression.py`, the single source of truth both the
+API and this document describe from:
+
+| Event | XP |
+|---|---|
+| Cat discovered | 100 |
+| Cat favorited (first time) | 10 |
+| Story generated (first time per cat) | 25 |
+| Cat shared (first time) | 15 |
+| Achievement unlocked | 50 |
+
+**Level formula**: level *N* requires `100 × (N-1)²` cumulative XP
+(level 1 = 0, level 2 = 100, level 3 = 400, level 4 = 900, ...),
+capped at `MAX_LEVEL = 20` so the number stays a small, legible
+milestone rather than growing without bound. Level is *derived* from
+`user_progress.xp` on every read (`level_for_xp`), never stored
+redundantly — the two can't drift apart because there's only one of
+them. Five cosmetic level-title bands (`"Meow Explorer"` →
+`"MeowVerse Legend"`) are pure flavor text with no other meaning,
+matching the codebase's existing "rarity is a game mechanic, not a
+measurement" stance on badges/tags.
+
+**Response shape**: any mutation that itself triggers a gamification
+event (`AnalysisResult.gamification` / `StoryResponse.gamification`)
+carries a `GamificationEvent` — `xp_awarded` (0 if this was a repeat,
+not a new event), `total_xp`, `level`, `leveled_up`, `is_new_breed`,
+`is_new_rarity`, and any `newly_unlocked` achievements from *this*
+call. A plain `GET` never carries one — viewing something isn't an
+event. The frontend's `lib/discovery-toast-store.ts` decomposes this
+into a queue of one-at-a-time toasts (breed → rarity → each
+achievement → level-up), so a single Save click that happens to hit
+several milestones at once doesn't show them all stacked simultaneously.
+
+## 16. Achievement Engine (Phase 10)
+
+Same compute-on-read pattern as Phase 9's original five achievements,
+extended to nine: `app/services/achievement_definitions.py` holds
+`AchievementDefinition`s (key, emoji, label, description, an
+`is_unlocked(stats) -> bool` predicate, and a `progress(stats) ->
+(current, target)` pair for the UI's progress bars) — pure functions
+over a `stats` dict, no side effects, independently testable.
+`collection_service.sync_and_list_achievements` builds that `stats`
+dict from real aggregate queries (never demo/fabricated data, since
+unowned guest rows can't reach a `user_id`-scoped query in the first
+place), checks it against every definition, and unlocks
+(`achievement_repository.unlock`, itself `ON CONFLICT DO NOTHING` on
+`(user_id, achievement_key)`) any that newly qualify. This runs on
+every `process_event` call and every direct `/me/achievements` fetch —
+cheap enough (a handful of indexed aggregate queries) to not need a
+background job at this scale.
+
+Two Phase 9 keys were *relabeled*, not renamed at the DB level
+(`legendary_hunter` → "Royal Encounter", `rainbow_collector` → "Color
+Collector", `cat_explorer` → "Cozy Collector", `first_meow` → "First
+Paw") — the `key` a user already has unlocked in `user_achievements`
+never changes, only the display label/emoji, so nothing "re-locks."
+Four new keys: `rare_hunter` (Rare-tier-or-higher, same tiered-threshold
+convention as the existing Legendary-or-higher one), `storyteller`
+(distinct cats with ≥1 story, *not* total story rows — see §15's
+anti-farming note, this reuses the same `STORY_GENERATED` event count
+so Regenerate can't inflate it either), `dream_keeper` (a real query
+for any Dreamy & Emotional story, `story_repository.has_story_of_style`),
+`cat_home` (first favorite).
+
+## 17. Breed Discovery & Collection Completion (Phase 10)
+
+**The canonical "breed universe"** is `ml/models/class_names.json` —
+the trained breed classifier's 12-class label set
+(`app/services/breed_catalog.py`), chosen because it's committed to
+the repo and always present, unlike the trained weights themselves.
+This is a fixed, documented denominator; nothing about it is invented
+per-request.
+
+**Two different, deliberately separate concepts** both use "breed,"
+and conflating them would be dishonest:
+
+- **Discovery moments** (`is_first_of_breed`/`is_first_of_rarity` in
+  `analysis_repository.py`) — "has this user ever gotten this exact
+  `breed_label` before" — apply to *any* breed string, including
+  demo-mode-only labels (`"Domestic Shorthair"`) that aren't in the
+  canonical 12. Recomputed fresh from real rows every time (excluding
+  the row currently being discovered), never a stored flag, so it can
+  never desync from what actually happened.
+- **Collection completion** (`CollectionStats.completion_percentage`)
+  — `round(100 × unique_breeds_discovered / total_supported_breeds, 1)`
+  where `unique_breeds_discovered` is `COUNT(DISTINCT breed_label)`
+  *restricted to the canonical 12*. A demo-only breed like "Domestic
+  Shorthair" contributes to a user's total cat count but never to this
+  percentage — there's no fabricated bonus for a label the classifier
+  wasn't actually trained to recognize.
+
+**Honest limitation this creates**: only 4 of the 5 demo-mode breed
+labels (`"British Shorthair"`, `"Maine Coon"`, `"Siamese"`, `"Bengal"`
+— not `"Domestic Shorthair"`) are canonical, so a user running purely
+in demo mode (no ML weights installed) can reach at most 4/12 ≈ 33%
+breed completion no matter how many cats they analyze. Documented
+here and in PROJECT_STATUS.md rather than hidden; installing the real
+breed classifier (`ml/training/train_breed_classifier.py`) is what
+unlocks the rest.
+
+**Duplicate cats** (spec §20) are handled by the same
+`user_id`-scoped, non-deduplicating queries throughout: `total_cats`
+counts every analysis row (two photos of the same breed are still two
+separate discoveries, two separate rows in the collection grid).
+`unique_breeds_discovered` and `rarity_distribution`
+(`analysis_repository.get_rarity_distribution`, zero-filled across all
+six tiers) are the only places a repeat breed/rarity *doesn't* add a
+second count — verified by `test_gamification.py`'s
+`test_duplicate_breed_does_not_inflate_unique_breed_completion` and
+the Playwright E2E script's step 6-7.
+
+**Breed Explorer** (`GET /api/v1/me/breeds`) merges the full canonical
+12-breed list with this user's real per-breed stats
+(`analysis_repository.get_breed_discovery_stats`) — an undiscovered
+breed gets `discovered: false`, `count: 0`, `best_confidence: null`,
+never a fabricated placeholder pretending the user has analyzed
+something they haven't.
+
+## 18. Discovery Moments & the MeowVerse Map (Phase 10)
+
+Discovery toasts (new breed / new rarity / achievement unlocked /
+level up) are event-driven, not polled or shown unconditionally — they
+ride along on the same `GamificationEvent` a mutation response already
+carries (§15), so a toast only ever fires immediately after the action
+that earned it, exactly once, with no separate "has this been shown
+before" flag to keep in sync (the underlying booleans —
+`is_new_breed`, `is_new_rarity`, `leveled_up`, `newly_unlocked` — are
+themselves already idempotent-by-construction).
+
+The **MeowVerse Map** (`frontend/features/collection/components/
+CollectionMap.tsx`) is a constellation view built from plain SVG +
+CSS + Framer Motion — no WebGL/3D engine. Each cat's position is a
+deterministic hash of its id (not stored coordinates), so the same cat
+always lands in the same spot without a migration or extra column;
+capped at 60 nodes for a "feel of the collection" view rather than a
+second copy of the paginated grid, which remains the actual browsing
+surface. Below the `sm` breakpoint, small scattered SVG touch targets
+stop being usable, so a plain list takes over instead (verified via
+Playwright responsive screenshots at 320px).

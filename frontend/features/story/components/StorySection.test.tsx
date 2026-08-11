@@ -39,6 +39,7 @@ function makeStory(overrides: Partial<StoryResponse> = {}): StoryResponse {
     provider: "demo",
     is_public: false,
     created_at: "2026-08-10T12:00:00Z",
+    gamification: null,
     ...overrides,
   };
 }

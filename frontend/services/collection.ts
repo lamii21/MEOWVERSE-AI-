@@ -1,4 +1,11 @@
-import type { Achievement, CollectionPage, CollectionQuery, CollectionStats } from "@/types/collection";
+import type {
+  Achievement,
+  BreedDiscovery,
+  CollectionPage,
+  CollectionQuery,
+  CollectionStats,
+  Progress,
+} from "@/types/collection";
 
 export type CollectionApiErrorKind = "unauthorized" | "server" | "network";
 
@@ -34,6 +41,7 @@ export async function fetchCollection(query: CollectionQuery = {}): Promise<Coll
   const params = new URLSearchParams();
   if (query.rarity) params.set("rarity", query.rarity);
   if (query.favoritesOnly) params.set("favorites_only", "true");
+  if (query.hasStory) params.set("has_story", "true");
   if (query.search) params.set("search", query.search);
   if (query.sort) params.set("sort", query.sort);
   if (query.page) params.set("page", String(query.page));
@@ -50,5 +58,15 @@ export async function fetchStats(): Promise<CollectionStats> {
 
 export async function fetchAchievements(): Promise<Achievement[]> {
   const response = await request("/api/v1/me/achievements");
+  return response.json();
+}
+
+export async function fetchBreeds(): Promise<BreedDiscovery[]> {
+  const response = await request("/api/v1/me/breeds");
+  return response.json();
+}
+
+export async function fetchProgress(): Promise<Progress> {
+  const response = await request("/api/v1/me/progress");
   return response.json();
 }

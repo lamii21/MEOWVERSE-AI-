@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.gamification import GamificationEvent
+
 
 class StoryStyle(str, Enum):
     MAGICAL_ADVENTURE = "magical_adventure"
@@ -65,3 +67,6 @@ class StoryResponse(BaseModel):
     provider: str
     is_public: bool
     created_at: datetime
+    # Phase 10: set only when the caller is authenticated and owns the
+    # analysis this story belongs to — see app/api/v1/stories.py.
+    gamification: GamificationEvent | None = None

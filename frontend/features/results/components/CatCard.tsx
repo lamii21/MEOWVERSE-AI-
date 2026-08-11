@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { GuestSavePrompt } from "@/features/auth/components/GuestSavePrompt";
+import { pushGamificationEvent } from "@/lib/discovery-toast-store";
 import { resolveMediaUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { shareAnalysis } from "@/services/analyses";
@@ -83,7 +84,8 @@ export function CatCard({
     if (!result.id || !result.owned) return;
     setShareState("sharing");
     try {
-      await shareAnalysis(result.id);
+      const shared = await shareAnalysis(result.id);
+      pushGamificationEvent(shared.gamification);
       const url = `${window.location.origin}/cat/${result.id}`;
       if (navigator.share) {
         try {

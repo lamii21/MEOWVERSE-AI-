@@ -1,16 +1,23 @@
 import uuid
 from typing import Literal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Text, case, cast, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis import CatAnalysisModel
+from app.models.story import StoryModel
 from app.schemas.analysis import AnalysisResult
 
 _RARITY_ORDER = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical"]
 _LEGENDARY_TIER_RARITIES = ("Legendary", "Mythical")
+# "Rare or higher" — same tiered-threshold pattern as
+# _LEGENDARY_TIER_RARITIES, one step down the ladder (Phase 10's Rare
+# Hunter achievement).
+_RARE_TIER_RARITIES = ("Rare", "Epic", "Legendary", "Mythical")
 
-CollectionSort = Literal["newest", "oldest", "rarity", "name"]
+CollectionSort = Literal[
+    "newest", "oldest", "name_asc", "name_desc", "rarity", "breed", "favorite"
+]
 
 
 async def save_analysis(
@@ -129,6 +136,7 @@ async def list_user_analyses(
     *,
     rarity: str | None = None,
     favorites_only: bool = False,
+    has_story: bool = False,
     search: str | None = None,
     sort: CollectionSort = "newest",
     page: int = 1,
@@ -139,11 +147,16 @@ async def list_user_analyses(
         filters.append(CatAnalysisModel.rarity == rarity)
     if favorites_only:
         filters.append(CatAnalysisModel.is_favorite.is_(True))
+    if has_story:
+        filters.append(
+            exists().where(StoryModel.analysis_id == CatAnalysisModel.id)
+        )
     if search:
         pattern = f"%{search.lower()}%"
         filters.append(
             func.lower(CatAnalysisModel.cat_name).like(pattern)
             | func.lower(CatAnalysisModel.breed_label).like(pattern)
+            | func.lower(cast(CatAnalysisModel.colors, Text)).like(pattern)
         )
 
     count_stmt = select(func.count(CatAnalysisModel.id)).where(*filters)
@@ -154,8 +167,18 @@ async def list_user_analyses(
         stmt = stmt.order_by(CatAnalysisModel.created_at.desc())
     elif sort == "oldest":
         stmt = stmt.order_by(CatAnalysisModel.created_at.asc())
-    elif sort == "name":
+    elif sort == "name_asc":
         stmt = stmt.order_by(CatAnalysisModel.cat_name.asc())
+    elif sort == "name_desc":
+        stmt = stmt.order_by(CatAnalysisModel.cat_name.desc())
+    elif sort == "breed":
+        stmt = stmt.order_by(
+            CatAnalysisModel.breed_label.asc(), CatAnalysisModel.created_at.desc()
+        )
+    elif sort == "favorite":
+        stmt = stmt.order_by(
+            CatAnalysisModel.is_favorite.desc(), CatAnalysisModel.created_at.desc()
+        )
     elif sort == "rarity":
         rarity_rank = case(
             {name: i for i, name in enumerate(_RARITY_ORDER)},
@@ -195,6 +218,15 @@ async def get_user_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
         )
     ).scalar_one()
 
+    rare_count = (
+        await db.execute(
+            select(func.count()).where(
+                CatAnalysisModel.user_id == user_id,
+                CatAnalysisModel.rarity.in_(_RARE_TIER_RARITIES),
+            )
+        )
+    ).scalar_one()
+
     favorites_count = (
         await db.execute(
             select(func.count()).where(
@@ -219,12 +251,13 @@ async def get_user_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
         "favorite_breed": favorite_breed_row[0] if favorite_breed_row else None,
         "most_common_color": most_common_color,
         "legendary_count": legendary_count,
+        "rare_count": rare_count,
         "favorites_count": favorites_count,
     }
 
 
 async def get_distinct_color_names(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
-    """Used by the Rainbow Collector achievement — `colors` is JSONB, so
+    """Used by the Color Collector achievement — `colors` is JSONB, so
     this pulls the raw rows and extracts names in Python rather than
     trying to express a JSONB-array-of-objects DISTINCT in SQL."""
     rows = (
@@ -237,3 +270,92 @@ async def get_distinct_color_names(db: AsyncSession, user_id: uuid.UUID) -> set[
         for swatch in palette:
             names.add(swatch["name"])
     return names
+
+
+async def get_rarity_distribution(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]:
+    """Zero-filled across all six tiers (Phase 10 spec §20/21: "define
+    rarity distribution clearly") — a tier the user hasn't discovered
+    yet reads as 0, not as a missing key the frontend has to guard for.
+    """
+    rows = (
+        await db.execute(
+            select(CatAnalysisModel.rarity, func.count())
+            .where(CatAnalysisModel.user_id == user_id)
+            .group_by(CatAnalysisModel.rarity)
+        )
+    ).all()
+    counts = {rarity: n for rarity, n in rows}
+    return {tier: counts.get(tier, 0) for tier in _RARITY_ORDER}
+
+
+async def get_discovered_breeds(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
+    """Every distinct breed_label this user has ever gotten, with no
+    filtering against the canonical breed universe — the caller (breed
+    catalog / completion-percentage logic) decides which of these count
+    toward "completion." See app/services/breed_catalog.py."""
+    rows = (
+        await db.execute(
+            select(CatAnalysisModel.breed_label)
+            .where(CatAnalysisModel.user_id == user_id)
+            .distinct()
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+async def get_breed_discovery_stats(
+    db: AsyncSession, user_id: uuid.UUID
+) -> dict[str, dict]:
+    """Per-breed aggregate stats for every breed this user has
+    analyzed at least once: count, best (highest) confidence, and the
+    most recent discovery date. Powers the Breed Explorer (Phase 10
+    spec §10) — merging against the full canonical breed list (for the
+    "undiscovered, still locked" rows) is the caller's job, in
+    app/services/collection_service.py, since this repository layer
+    shouldn't need to know about the ML breed-catalog module.
+    """
+    rows = (
+        await db.execute(
+            select(
+                CatAnalysisModel.breed_label,
+                func.count().label("count"),
+                func.max(CatAnalysisModel.breed_confidence).label("best_confidence"),
+                func.max(CatAnalysisModel.created_at).label("latest_discovery"),
+            )
+            .where(CatAnalysisModel.user_id == user_id)
+            .group_by(CatAnalysisModel.breed_label)
+        )
+    ).all()
+    return {
+        breed: {"count": count, "best_confidence": best_confidence, "latest_discovery": latest}
+        for breed, count, best_confidence, latest in rows
+    }
+
+
+async def is_first_of_breed(
+    db: AsyncSession, user_id: uuid.UUID, breed_label: str, exclude_id: uuid.UUID
+) -> bool:
+    """Whether `exclude_id` (the analysis just created/claimed) is the
+    *first* time this user has ever gotten this exact breed_label —
+    drives the "New breed discovered!" toast (spec §19). Deliberately
+    recomputed fresh from the real rows every time rather than a stored
+    flag, so it can never desync from what actually happened."""
+    stmt = select(func.count()).where(
+        CatAnalysisModel.user_id == user_id,
+        CatAnalysisModel.breed_label == breed_label,
+        CatAnalysisModel.id != exclude_id,
+    )
+    return (await db.execute(stmt)).scalar_one() == 0
+
+
+async def is_first_of_rarity(
+    db: AsyncSession, user_id: uuid.UUID, rarity: str, exclude_id: uuid.UUID
+) -> bool:
+    """Same idea as `is_first_of_breed`, for rarity tiers (spec §19's
+    "New rarity discovered!" toast)."""
+    stmt = select(func.count()).where(
+        CatAnalysisModel.user_id == user_id,
+        CatAnalysisModel.rarity == rarity,
+        CatAnalysisModel.id != exclude_id,
+    )
+    return (await db.execute(stmt)).scalar_one() == 0

@@ -1,9 +1,11 @@
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.schemas.common import ColorSwatch
+from app.schemas.gamification import GamificationEvent
 from app.schemas.profile import CatProfile, ProfileModeLiteral
 
 __all__ = ["AnalysisResult", "BreedPrediction", "ColorSwatch"]
@@ -61,3 +63,14 @@ class AnalysisResult(BaseModel):
     """Set if the photo was persisted via ImageStorageProvider (Phase 9)
     — best-effort, same philosophy as `id`: None doesn't fail the
     request, it just means the image won't survive a refresh."""
+    # Phase 10: only set on responses from an action that itself
+    # triggers a gamification event (create/save/favorite/share) — a
+    # plain GET never carries one, since viewing a cat isn't an event.
+    gamification: GamificationEvent | None = None
+    created_at: datetime | None = None
+    """None only if persistence failed (mirrors `id`) — powers the
+    collection card's "discovered on" date."""
+    has_story: bool = False
+    """Whether at least one story has ever been generated for this cat
+    — a real query (see story_repository.has_any_story /
+    get_analysis_ids_with_stories), never inferred."""

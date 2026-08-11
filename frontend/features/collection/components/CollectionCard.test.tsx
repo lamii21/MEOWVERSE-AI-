@@ -31,6 +31,9 @@ function makeResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
     owned: true,
     is_favorite: false,
     image_url: null,
+    gamification: null,
+    created_at: "2026-01-01T00:00:00Z",
+    has_story: false,
     ...overrides,
   };
 }
@@ -62,5 +65,18 @@ describe("CollectionCard", () => {
   it("falls back to a placeholder emoji when there's no image", () => {
     render(<CollectionCard result={makeResult({ image_url: null })} />);
     expect(screen.getByText("🐱")).toBeInTheDocument();
+  });
+
+  it("shows a story indicator only when a story exists", () => {
+    const { rerender } = render(<CollectionCard result={makeResult({ has_story: false })} />);
+    expect(screen.queryByLabelText("Has a story")).not.toBeInTheDocument();
+
+    rerender(<CollectionCard result={makeResult({ has_story: true })} />);
+    expect(screen.getByLabelText("Has a story")).toBeInTheDocument();
+  });
+
+  it("shows the real discovery date, never a fabricated one", () => {
+    render(<CollectionCard result={makeResult({ created_at: "2026-03-05T00:00:00Z" })} />);
+    expect(screen.getByText(/Discovered/)).toBeInTheDocument();
   });
 });

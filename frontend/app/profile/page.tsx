@@ -1,14 +1,17 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Cat, Crown, Heart, Palette } from "lucide-react";
+import { BookOpen, Cat, Crown, Gem, Heart, Palette, Sparkles } from "lucide-react";
+import Link from "next/link";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { RequireAuth } from "@/features/auth/components/RequireAuth";
+import { ProgressCard } from "@/features/gamification/components/ProgressCard";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchAchievements, fetchStats } from "@/services/collection";
+import { resolveMediaUrl } from "@/lib/media";
+import { fetchAchievements, fetchCollection, fetchProgress, fetchStats } from "@/services/collection";
 import { cn } from "@/lib/utils";
 
 function initialsOf(name: string): string {
@@ -41,6 +44,12 @@ function ProfileContent() {
   const { user } = useAuth();
   const statsQuery = useQuery({ queryKey: ["stats"], queryFn: fetchStats });
   const achievementsQuery = useQuery({ queryKey: ["achievements"], queryFn: fetchAchievements });
+  const progressQuery = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
+  const favoriteCatQuery = useQuery({
+    queryKey: ["favorite-cat-preview"],
+    queryFn: () => fetchCollection({ favoritesOnly: true, sort: "newest", page: 1, pageSize: 1 }),
+  });
+  const favoriteCat = favoriteCatQuery.data?.items[0] ?? null;
 
   if (!user) return null;
 
@@ -57,12 +66,26 @@ function ProfileContent() {
         </p>
       </div>
 
+      {progressQuery.data && <ProgressCard progress={progressQuery.data} />}
+
       {statsQuery.data && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile icon={Cat} label="Cats discovered" value={statsQuery.data.total_cats} />
           <StatTile icon={Heart} label="Favorites" value={statsQuery.data.favorites_count} />
+          <StatTile icon={Gem} label="Rare+" value={statsQuery.data.rare_count} />
           <StatTile icon={Crown} label="Legendary+" value={statsQuery.data.legendary_count} />
           <StatTile icon={BookOpen} label="Stories" value={statsQuery.data.stories_created} />
+          <StatTile
+            icon={Sparkles}
+            label="MeowVerse explored"
+            value={`${statsQuery.data.completion_percentage}%`}
+          />
+          <StatTile
+            icon={Cat}
+            label="Breeds found"
+            value={`${statsQuery.data.unique_breeds_discovered}/${statsQuery.data.total_supported_breeds}`}
+          />
+          <StatTile icon={Palette} label="Colors found" value={statsQuery.data.unique_colors_discovered} />
         </div>
       )}
 
@@ -84,10 +107,40 @@ function ProfileContent() {
         </div>
       )}
 
+      {favoriteCat && (
+        <Link
+          href={`/collection/${favoriteCat.id}`}
+          className="glass flex items-center gap-4 rounded-2xl p-4 transition-transform hover:-translate-y-0.5"
+        >
+          <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-magic-200 to-peach-200 text-2xl dark:from-magic-900/60 dark:to-peach-900/40">
+            {favoriteCat.image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolveMediaUrl(favoriteCat.image_url) ?? undefined}
+                alt=""
+                className="size-full object-cover"
+              />
+            ) : (
+              <span aria-hidden="true">🐱</span>
+            )}
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Your favorite cat</p>
+            <p className="font-heading text-sm font-semibold">{favoriteCat.profile.name}</p>
+            <p className="text-xs text-muted-foreground">{favoriteCat.profile.rarity}</p>
+          </div>
+        </Link>
+      )}
+
       <Separator />
 
       <div id="achievements">
-        <h2 className="font-heading text-lg font-semibold">Achievements</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-heading text-lg font-semibold">Achievements</h2>
+          <Link href="/achievements" className="text-xs font-medium text-magic-600 hover:underline dark:text-magic-300">
+            View all
+          </Link>
+        </div>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {achievementsQuery.data?.map((achievement) => (
             <div

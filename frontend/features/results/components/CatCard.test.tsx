@@ -82,6 +82,9 @@ function makeResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
     owned: false,
     is_favorite: false,
     image_url: null,
+    gamification: null,
+    created_at: "2026-01-01T00:00:00Z",
+    has_story: false,
     ...overrides,
   };
 }

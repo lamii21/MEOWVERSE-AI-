@@ -158,12 +158,46 @@ account.
   revocable token (not a JWT) — logging out immediately invalidates
   the session server-side. See ARCHITECTURE.md §11 for the full
   security rationale.
-- **`/collection`** — your full gallery: filter by favorites or
-  rarity, search by name or breed, sort by newest/oldest/rarity/name.
-- **`/profile`** — your stats (cats discovered, favorite breed, most
-  common color, legendary cats, stories written) and achievements,
-  all computed from your real saved cats — never fabricated.
+- **`/collection`** — "My Cat Universe": your full gallery, real stats
+  (total/favorites/stories/rare+/legendary+/completion%), filters
+  (rarity tiers, Favorites, Stories, Recently Discovered), debounced
+  search (name/breed/color), sort (newest/oldest/name/rarity/breed/
+  favorite), and two original views: a **MeowVerse Map** (a
+  constellation of your discovered cats, no 3D engine — plain
+  SVG/CSS/Framer Motion) and a **Breed Explorer** (every breed the
+  classifier recognizes, locked until you discover it).
+- **`/profile`** — your level, XP bar, stats, favorite cat, and
+  achievements, all computed from your real saved cats — never
+  fabricated.
+- **`/achievements`** — 9 milestones (First Paw, Cozy Collector,
+  Collector, Rare Hunter, Royal Encounter, Color Collector, Storyteller,
+  Dream Keeper, Cat Home), each unlocked by a real action, with a
+  progress bar toward the locked ones.
 - A saved cat is **private by default**; only clicking **Share**
   makes that specific cat viewable at a public `/cat/[id]` link, and
   only its intended public fields are ever exposed there — never your
   email or account details.
+
+## Progression: XP, levels & achievements
+
+Discovering, favoriting, and sharing cats — and generating stories —
+earns XP, calculated and awarded **only on the backend** (the frontend
+never sends an XP value, and repeating an action, like toggling
+favorite on and off or clicking Regenerate, never pays out twice):
+
+| Action | XP |
+|---|---|
+| Discover a cat | 100 |
+| Favorite a cat (first time) | 10 |
+| Generate a story (first time per cat) | 25 |
+| Share a cat (first time) | 15 |
+| Unlock an achievement | 50 |
+
+Levels follow a documented, easy-to-retune curve (level *N* needs
+`100 × (N-1)²` XP), capped at level 20. A "collection completion"
+percentage compares the breeds you've discovered against a fixed,
+real 12-breed universe (`ml/models/class_names.json`) — never an
+invented denominator. See ARCHITECTURE.md §15–18 for the full design,
+including how duplicate cats of the same breed are counted honestly
+(every cat counts toward your total; only genuinely new breeds move
+the completion percentage).

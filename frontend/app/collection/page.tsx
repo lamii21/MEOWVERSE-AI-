@@ -1,15 +1,19 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Heart, Search, Sparkles } from "lucide-react";
+import { BookOpen, Cat, Crown, Gem, Heart, Map as MapIcon, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CollectionCard } from "@/features/collection/components/CollectionCard";
+import { BreedExplorer } from "@/features/collection/components/BreedExplorer";
+import { CollectionMap } from "@/features/collection/components/CollectionMap";
 import { RequireAuth } from "@/features/auth/components/RequireAuth";
-import { fetchCollection } from "@/services/collection";
+import { ProgressCard } from "@/features/gamification/components/ProgressCard";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { fetchBreeds, fetchCollection, fetchProgress, fetchStats } from "@/services/collection";
 import { cn } from "@/lib/utils";
 
 import type { Rarity } from "@/types/analysis";
@@ -18,38 +22,106 @@ import type { CollectionSort } from "@/types/collection";
 const RARITIES: Rarity[] = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical"];
 const PAGE_SIZE = 24;
 
+type QuickFilter = "all" | "favorites" | "stories" | "recent" | Rarity;
+
+const QUICK_FILTERS: { value: QuickFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "favorites", label: "Favorites" },
+  ...RARITIES.map((r) => ({ value: r as QuickFilter, label: r })),
+  { value: "stories", label: "Stories" },
+  { value: "recent", label: "Recently Discovered" },
+];
+
 const SORT_OPTIONS: { value: CollectionSort; label: string }[] = [
   { value: "newest", label: "Newest" },
   { value: "oldest", label: "Oldest" },
+  { value: "name_asc", label: "Name A-Z" },
+  { value: "name_desc", label: "Name Z-A" },
   { value: "rarity", label: "Rarity" },
-  { value: "name", label: "Name" },
+  { value: "breed", label: "Breed" },
+  { value: "favorite", label: "Favorite" },
 ];
 
+function StatChip({ icon: Icon, label, value }: { icon: typeof Cat; label: string; value: string | number }) {
+  return (
+    <div className="glass flex flex-col items-center rounded-2xl p-3 text-center">
+      <Icon className="size-4 text-magic-500" aria-hidden="true" />
+      <p className="mt-1 font-heading text-lg font-bold">{value}</p>
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
 function CollectionContent() {
-  const [rarity, setRarity] = useState<Rarity | null>(null);
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [search, setSearch] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput, 350);
   const [sort, setSort] = useState<CollectionSort>("newest");
   const [page, setPage] = useState(1);
+  const [showMap, setShowMap] = useState(false);
+  const [showBreeds, setShowBreeds] = useState(false);
 
-  const query = useQuery({
-    queryKey: ["collection", { rarity, favoritesOnly, search, sort, page }],
+  const rarity = (RARITIES as string[]).includes(quickFilter) ? (quickFilter as Rarity) : null;
+  const favoritesOnly = quickFilter === "favorites";
+  const hasStory = quickFilter === "stories";
+  // "Recently Discovered" is a real chip but not a fabricated
+  // time-window filter (e.g. "last 7 days" would be an invented
+  // threshold) — it simply forces the honest, already-real "newest
+  // first" ordering, same as the spec's own reluctance to invent
+  // definitions it doesn't need (§9).
+  const effectiveSort: CollectionSort = quickFilter === "recent" ? "newest" : sort;
+
+  const collectionQuery = useQuery({
+    queryKey: ["collection", { rarity, favoritesOnly, hasStory, search, sort: effectiveSort, page }],
     queryFn: () =>
-      fetchCollection({ rarity, favoritesOnly, search, sort, page, pageSize: PAGE_SIZE }),
+      fetchCollection({
+        rarity,
+        favoritesOnly,
+        hasStory,
+        search,
+        sort: effectiveSort,
+        page,
+        pageSize: PAGE_SIZE,
+      }),
   });
+  const statsQuery = useQuery({ queryKey: ["stats"], queryFn: fetchStats });
+  const progressQuery = useQuery({ queryKey: ["progress"], queryFn: fetchProgress });
+  const breedsQuery = useQuery({ queryKey: ["breeds"], queryFn: fetchBreeds, enabled: showBreeds });
 
-  const totalPages = query.data ? Math.max(1, Math.ceil(query.data.total / PAGE_SIZE)) : 1;
+  const totalPages = collectionQuery.data
+    ? Math.max(1, Math.ceil(collectionQuery.data.total / PAGE_SIZE))
+    : 1;
 
-  function resetToFirstPage() {
+  function selectFilter(value: QuickFilter) {
+    setQuickFilter(value);
     setPage(1);
   }
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-12 sm:px-6">
       <div className="text-center">
-        <h1 className="font-heading text-3xl font-bold tracking-tight">My Cats</h1>
-        <p className="mt-2 text-muted-foreground">Every cat you&apos;ve discovered and saved.</p>
+        <h1 className="font-heading text-3xl font-bold tracking-tight">My Cat Universe</h1>
+        <p className="mt-2 text-muted-foreground">
+          Every little friend you&apos;ve discovered lives here.
+        </p>
       </div>
+
+      {statsQuery.data && (
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+          <StatChip icon={Cat} label="Cats" value={statsQuery.data.total_cats} />
+          <StatChip icon={Heart} label="Favorites" value={statsQuery.data.favorites_count} />
+          <StatChip icon={BookOpen} label="Stories" value={statsQuery.data.stories_created} />
+          <StatChip icon={Gem} label="Rare+" value={statsQuery.data.rare_count} />
+          <StatChip icon={Crown} label="Legendary+" value={statsQuery.data.legendary_count} />
+          <StatChip
+            icon={Sparkles}
+            label="Explored"
+            value={`${statsQuery.data.completion_percentage}%`}
+          />
+        </div>
+      )}
+
+      {progressQuery.data && <ProgressCard progress={progressQuery.data} />}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative w-full sm:max-w-xs">
@@ -58,35 +130,18 @@ function CollectionContent() {
             aria-hidden="true"
           />
           <Input
-            value={search}
+            value={searchInput}
             onChange={(e) => {
-              setSearch(e.target.value);
-              resetToFirstPage();
+              setSearchInput(e.target.value);
+              setPage(1);
             }}
-            placeholder="Search by name or breed..."
+            placeholder="Search by name, breed, or color..."
             className="pl-8"
             aria-label="Search your cats"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant={favoritesOnly ? "secondary" : "outline"}
-            size="sm"
-            className="gap-1.5 rounded-full"
-            aria-pressed={favoritesOnly}
-            onClick={() => {
-              setFavoritesOnly((v) => !v);
-              resetToFirstPage();
-            }}
-          >
-            <Heart
-              className={cn("size-3.5", favoritesOnly && "fill-destructive text-destructive")}
-              aria-hidden="true"
-            />
-            Favorites
-          </Button>
-
           <label className="sr-only" htmlFor="collection-sort">
             Sort by
           </label>
@@ -105,57 +160,37 @@ function CollectionContent() {
         </div>
       </div>
 
-      <div role="radiogroup" aria-label="Filter by rarity" className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={rarity === null}
-          onClick={() => {
-            setRarity(null);
-            resetToFirstPage();
-          }}
-          className={cn(
-            "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-            rarity === null
-              ? "border-magic-400 bg-magic-100 text-magic-700 dark:bg-magic-900/40"
-              : "border-border text-muted-foreground hover:text-foreground",
-          )}
-        >
-          All
-        </button>
-        {RARITIES.map((r) => (
+      <div role="radiogroup" aria-label="Filter your collection" className="flex flex-wrap gap-2">
+        {QUICK_FILTERS.map((f) => (
           <button
-            key={r}
+            key={f.value}
             type="button"
             role="radio"
-            aria-checked={rarity === r}
-            onClick={() => {
-              setRarity(r);
-              resetToFirstPage();
-            }}
+            aria-checked={quickFilter === f.value}
+            onClick={() => selectFilter(f.value)}
             className={cn(
               "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-              rarity === r
+              quickFilter === f.value
                 ? "border-magic-400 bg-magic-100 text-magic-700 dark:bg-magic-900/40"
                 : "border-border text-muted-foreground hover:text-foreground",
             )}
           >
-            {r}
+            {f.label}
           </button>
         ))}
       </div>
 
-      {query.isLoading && (
+      {collectionQuery.isLoading && (
         <p className="py-16 text-center text-sm text-muted-foreground">Loading your cats...</p>
       )}
 
-      {query.isError && (
+      {collectionQuery.isError && (
         <p className="py-16 text-center text-sm text-destructive" role="alert">
           The Cat Universe is taking a nap. Try again soon.
         </p>
       )}
 
-      {query.data && query.data.items.length === 0 && (
+      {collectionQuery.data && collectionQuery.data.items.length === 0 && (
         <div className="flex flex-col items-center gap-4 py-16 text-center">
           <Sparkles className="size-8 text-muted-foreground" aria-hidden="true" />
           <p className="font-heading text-lg font-semibold">
@@ -167,10 +202,10 @@ function CollectionContent() {
         </div>
       )}
 
-      {query.data && query.data.items.length > 0 && (
+      {collectionQuery.data && collectionQuery.data.items.length > 0 && (
         <>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {query.data.items.map((item) => (
+            {collectionQuery.data.items.map((item) => (
               <CollectionCard key={item.id} result={item} />
             ))}
           </div>
@@ -198,8 +233,34 @@ function CollectionContent() {
               </Button>
             </div>
           )}
+
+          <div className="mt-2 flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => setShowMap((v) => !v)}
+              className="flex items-center gap-2 self-start rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              aria-expanded={showMap}
+            >
+              <MapIcon className="size-4" aria-hidden="true" />
+              {showMap ? "Hide MeowVerse Map" : "Show MeowVerse Map"}
+            </button>
+            {showMap && <CollectionMap cats={collectionQuery.data.items} />}
+          </div>
         </>
       )}
+
+      <div className="flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => setShowBreeds((v) => !v)}
+          className="flex items-center gap-2 self-start rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          aria-expanded={showBreeds}
+        >
+          <Cat className="size-4" aria-hidden="true" />
+          {showBreeds ? "Hide Breed Explorer" : "Show Breed Explorer"}
+        </button>
+        {showBreeds && breedsQuery.data && <BreedExplorer breeds={breedsQuery.data} />}
+      </div>
     </div>
   );
 }
