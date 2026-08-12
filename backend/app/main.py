@@ -6,6 +6,7 @@ from app.api.v1.analyses import router as analyses_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collection import router as collection_router
 from app.api.v1.health import router as health_router
+from app.api.v1.similarity import router as similarity_router
 from app.api.v1.stories import router as stories_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -39,3 +40,4 @@ app.include_router(auth_router)
 app.include_router(analyses_router)
 app.include_router(stories_router)
 app.include_router(collection_router)
+app.include_router(similarity_router)

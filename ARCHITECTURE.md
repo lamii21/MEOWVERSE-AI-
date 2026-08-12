@@ -775,3 +775,205 @@ second copy of the paginated grid, which remains the actual browsing
 surface. Below the `sm` breakpoint, small scattered SVG touch targets
 stop being usable, so a plain list takes over instead (verified via
 Playwright responsive screenshots at 320px).
+
+## 19. Visual Similarity Architecture (Phase 11)
+
+**The layering the spec asked for, exactly**:
+
+```
+EmbeddingModel  (app/ml/embedding_model.py)
+     ↓
+CatEmbeddingService  (app/services/embedding_service.py)
+     ↓
+VectorIndex  (app/similarity/vector_index.py)
+     ↓
+SimilarityService  (app/services/similarity_service.py)
+     ↓
+API  (app/api/v1/similarity.py)
+     ↓
+Frontend  (frontend/features/similarity/)
+```
+
+Nothing above `EmbeddingModel` depends on *which* embedding model is
+running (a future stronger backbone is a drop-in swap — same
+`BaseModel` contract as `BreedClassifier`/`FurColorAnalyzer`); nothing
+above `VectorIndex` depends on FAISS specifically (a future
+`PgVectorIndex` implements the same four-method interface).
+
+**Embedding model**: `torchvision.models.mobilenet_v3_small` with its
+stock **ImageNet-pretrained** weights
+(`MobileNet_V3_Small_Weights.IMAGENET1K_V1`) — deliberately *not* this
+project's own breed-fine-tuned weights (`app/ml/breed_classifier.py`).
+A breed-fine-tuned backbone's features are pulled toward separating
+the 12 trained breed classes, which is exactly the "similarity from
+breed labels" shortcut the spec forbids (§3); a generic ImageNet
+backbone encodes broader visual structure (shape, texture, coloring
+pattern, pose) instead. `predict()` runs the image through `features`
++ `avgpool` and stops *before* the 1000-way classification head,
+returning the 576-dim globally-pooled feature vector — the standard,
+well-established way to get an embedding from an image classifier
+without training anything new (spec §2: "do not train a new model
+from scratch unless there is a demonstrated need"). No new model was
+trained for this phase.
+
+**Preprocessing** (deterministic, identical constants to the breed
+classifier for auditability): resize so the shorter edge is
+`224 × 1.14 ≈ 255`px, center-crop to 224×224, convert to RGB,
+normalize with ImageNet mean/std (`[0.485, 0.456, 0.406]` /
+`[0.229, 0.224, 0.225]`). Same image bytes always produce the same
+embedding (verified in `test_embedding_model.py`).
+
+**Normalization & similarity metric**: every embedding is L2-normalized
+*once*, at the source, inside `EmbeddingModel.predict()` — every
+downstream consumer can assume unit-length vectors. For two
+unit-length vectors *a*, *b*, the inner product `a·b` **is** cosine
+similarity (`cos θ = a·b / (‖a‖‖b‖) = a·b` when `‖a‖=‖b‖=1`) — no
+approximation, no invented scale. `FAISSVectorIndex` uses
+`faiss.IndexFlatIP` (inner product) specifically so the raw FAISS
+score *is* the cosine similarity with no further transform needed.
+The one presentation-layer decision: `SimilarCat.visual_similarity =
+max(0, cosine_similarity)`, floored at zero only for *display*
+purposes (a negative cosine — visually near-opposite in the model's
+feature space — has no sensible "-40% similar" UI reading). The
+frontend multiplies by 100 and rounds for the "94% visually similar"
+label; nothing about breed or color ever enters this number.
+
+**Vector index**: `FAISSVectorIndex`
+(`faiss.IndexIDMap2(faiss.IndexFlatIP(576))`) — exact (brute-force),
+not approximate, search. At the spec's own target scale ("hundreds or
+thousands" of vectors, §22) `IndexFlatIP` search is sub-millisecond
+(measured: 0.9ms mean at 24 real indexed vectors — see
+PROJECT_STATUS.md for the full latency table) and exact search means
+the mathematics documented above are never approximated away for
+speed the project doesn't need yet. `IndexIDMap2` (not the plainer
+`IndexIDMap`) specifically because it maintains the reverse map that
+makes `reconstruct(vector_id)` work — confirmed the hard way: the
+plainer wrapper raises `"reconstruct not implemented for this type of
+index"` (see PROJECT_STATUS.md's bug log). Reconstruction is how
+`SimilarityService` gets a *query* vector for "cats similar to
+analysis X" without ever storing the raw 576 floats a second time
+anywhere (Postgres included) — the flat index already keeps the exact
+vectors; `get_vector()` just reads one back out.
+
+**Persistence**: write-through — every `add`/`remove` immediately
+`faiss.write_index`s the whole index to
+`data/similarity_index.faiss`. At this scale (a few thousand 576-dim
+float32 vectors ≈ a few MB) rewriting the whole file per mutation is
+cheap and guarantees the index survives an unclean restart without a
+WAL or clean-shutdown hook; a production deployment at much larger
+scale would batch/debounce this instead — documented as a known
+simplification. On load, a dimension mismatch against the currently
+configured embedding model, or a corrupt/unreadable file, marks the
+index `is_available = False` rather than silently starting empty or
+crashing (spec §21: "fail safely, never return incorrect results").
+
+## 20. Duplicate Images & Content-Hash Deduplication (Phase 11)
+
+`app/models/embedding.py`'s `CatEmbeddingModel` maps one
+`cat_analyses` row to a FAISS `vector_id`, keyed by a sha256
+`content_hash` of the raw uploaded bytes. `embedding_service.py`'s
+`embed_and_index` checks that hash *before* ever calling the embedding
+model: if an existing row (same `content_hash`, same
+`embedding_model`/`embedding_version`) is found, the new analysis gets
+a row pointing at the **same** `vector_id` — no second, redundant
+vector is added to FAISS. `vector_id` is deliberately *not* unique on
+this table (`analysis_id` is); several analyses can share one vector.
+This is why `SimilarityService`'s self-exclusion filters by
+`analysis_id`, not `vector_id` — two genuinely different analyses that
+happen to share identical image bytes are still two different cats in
+the collection and can legitimately appear as (extremely) similar
+results to each other, just never to *themselves*.
+
+Removal (`embedding_service.remove_from_index`) is reference-counted:
+a FAISS vector is only actually removed once no other
+`cat_embeddings` row still references its `vector_id`, so deleting one
+duplicate-content analysis never breaks a sibling's search results.
+No caller triggers this yet (there is no "delete an analysis" feature
+— see PROJECT_STATUS.md), but the method exists, is correct, and is
+tested, ready for whenever that feature is built.
+
+## 21. Privacy & Indexing Policy (Phase 11)
+
+**Every cat that gets an embedding is indexed** — there is no separate
+public/private FAISS index (spec §9 offers this as an *example*
+policy, not a requirement; a single global index was chosen instead,
+see below for why this is still safe). **Privacy is enforced entirely
+at the `SimilarityService` layer, after retrieval, via the same
+ownership-scoped SQL pattern this codebase already uses everywhere
+else** (Phase 9 §12): FAISS returns candidate `vector_id`s with no
+notion of who owns what; `SimilarityService` resolves those to real
+`cat_analyses` rows and applies `_is_eligible(row, viewer_user_id)` —
+public, OR authenticated-and-owns-it — to *every single candidate*
+before it can reach a response. A guest (`viewer_user_id is None`) has
+no "OR" clause at all: only public cats, ever. This is the same
+"impossible to accidentally expose" guarantee Phase 9 established for
+ownership checks generally, applied to a new resource: the eligibility
+check is unconditional and happens exactly once, right before
+serialization, not scattered across call sites where one could be
+forgotten.
+
+Because eligible-but-ranked-lower candidates could be filtered out
+after retrieval (privacy, then optional breed/rarity/favorite
+filters), `SimilarityService` over-fetches from FAISS —
+`min(k × similarity_candidate_oversample, index.size)` candidates,
+default oversample factor 10 — so enough *eligible* results remain
+after filtering to actually fill up to `k`. The source cat itself must
+also pass the existing "public OR you own it" visibility check (same
+one `GET /api/v1/analyses/{id}` uses) before any search runs at all —
+you can't probe for "similar cats" on an analysis you can't see in the
+first place.
+
+**What's never exposed**: email addresses, internal-only metadata, a
+stranger's `is_favorite` status (computed per-candidate from the
+*viewer's own* ownership, exactly like `analysis_row_to_result`'s
+existing `viewer_is_owner`-gated pattern — Phase 9 §12), private image
+URLs (an ineligible candidate never reaches the response to have its
+`image_url` read in the first place), or which embedding model
+produced a result the caller isn't allowed to see.
+
+## 22. Model Versioning, Reindexing & Index Management (Phase 11)
+
+Every `cat_embeddings` row records `embedding_model`,
+`embedding_version`, and `embedding_dim` at the time it was created —
+never assumed constant. `EMBEDDING_MODEL_NAME =
+"mobilenet_v3_small_imagenet"`, `EMBEDDING_VERSION = "v1"` live in one
+place (`app/ml/embedding_model.py`) that everything else reads from.
+If a future, stronger embedding model replaces this one, its vectors
+are **not mathematically comparable** to v1's (different model,
+different feature space) — the version fields are exactly how the
+system would know that, and `python -m app.cli.similarity_index
+verify` flags every row whose `embedding_model`/`embedding_version`
+doesn't match the currently-configured one as **stale**, instructing
+a rebuild rather than silently mixing incompatible vectors in one
+index.
+
+**Reindexing** is deliberately simple, per the spec's own "keep it
+simple and understandable, don't attempt zero-downtime multi-version
+indexing unless necessary" (§35): `python -m app.cli.similarity_index
+rebuild` clears every `cat_embeddings` row and the FAISS index, then
+re-embeds every analysis that has a stored photo, from scratch, with
+whatever model is currently configured. No dual-index cutover, no
+partial-migration state — a v1→v2 upgrade is "run rebuild," not a
+multi-step migration.
+
+**Index management** (`app/cli/similarity_index.py`, spec §20) is a
+plain CLI, never an HTTP endpoint a normal user (or even an
+authenticated one) could reach:
+
+- `build` — embeds every analysis with a stored photo that doesn't
+  have an embedding yet (the normal backfill/catch-up path).
+- `rebuild` — clears and re-embeds everything (the model-upgrade path).
+- `verify` — consistency checks (spec §21): duplicate
+  `analysis_id`→`vector_id` mappings, `cat_embeddings` rows whose
+  `analysis_id` no longer exists, stale model/version rows, embedding-
+  dimension mismatches, FAISS vectors with no Postgres row pointing at
+  them (orphans), and an unavailable/corrupt index. Reports every
+  problem found and exits non-zero; never silently repairs anything —
+  a silent repair would hide exactly the kind of bug this command
+  exists to surface.
+
+Run for real against this project's own accumulated dev database
+during Phase 11 (see PROJECT_STATUS.md for the actual numbers):
+`build` correctly backfilled 869 previously-unembedded analyses,
+`verify` reported zero problems across 980 real embedding rows
+afterward.

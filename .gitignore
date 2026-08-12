@@ -24,6 +24,10 @@ htmlcov/
 # --- Local image storage (Phase 9 dev-only ImageStorageProvider) ---
 backend/uploads/
 
+# --- Visual similarity index (Phase 11) — a real binary FAISS index
+# built from this machine's own dev data, not project source. ---
+backend/data/
+
 # --- ML artifacts ---
 backend/ml/models/*.pt
 backend/ml/models/*.pth

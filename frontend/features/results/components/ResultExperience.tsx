@@ -2,6 +2,7 @@ import { Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { HowMeowVerseKnows } from "@/features/analyze/components/HowMeowVerseKnows";
+import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
 import { StorySection } from "@/features/story/components/StorySection";
 
 import { CatCard } from "./CatCard";
@@ -83,23 +84,27 @@ export function ResultExperience({
   return (
     <ResultReveal catImageUrl={catImageUrl}>
       {(interactive) => (
-        <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-8 lg:flex-row lg:items-start lg:justify-center">
-          <div className="flex justify-center lg:sticky lg:top-8 lg:shrink-0">
-            <CatCard result={result} catImageUrl={catImageUrl} interactive={interactive} />
-          </div>
-
-          <div className="glass w-full max-w-md rounded-3xl p-6 text-center lg:text-left">
-            <SignalModes result={result} />
-
-            <div className="mt-4">
-              <HowMeowVerseKnows result={result} />
+        <>
+          <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-8 lg:flex-row lg:items-start lg:justify-center">
+            <div className="flex justify-center lg:sticky lg:top-8 lg:shrink-0">
+              <CatCard result={result} catImageUrl={catImageUrl} interactive={interactive} />
             </div>
 
-            <div id="story-section" className="scroll-mt-8">
-              <StorySection analysisId={result.id} catImageUrl={catImageUrl} />
+            <div className="glass w-full max-w-md rounded-3xl p-6 text-center lg:text-left">
+              <SignalModes result={result} />
+
+              <div className="mt-4">
+                <HowMeowVerseKnows result={result} />
+              </div>
+
+              <div id="story-section" className="scroll-mt-8">
+                <StorySection analysisId={result.id} catImageUrl={catImageUrl} />
+              </div>
             </div>
           </div>
-        </div>
+
+          <CatsLikeThis analysisId={result.id} />
+        </>
       )}
     </ResultReveal>
   );

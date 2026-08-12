@@ -71,6 +71,18 @@ class Settings(BaseSettings):
     image_storage_provider: str = "local"
     image_storage_dir: str = "uploads"
 
+    # --- Visual similarity (Phase 11) ---
+    # Persisted FAISS index file — see app/similarity/vector_index.py.
+    # Write-through (rewritten on every add/remove) so it always
+    # survives a restart without needing a clean-shutdown hook.
+    similarity_index_path: str = "data/similarity_index.faiss"
+    # How many candidates to pull from FAISS before privacy filtering,
+    # self-exclusion, and optional breed/rarity/favorite filters are
+    # applied — must be > k so enough *eligible* results remain after
+    # filtering. See app/services/similarity_service.py.
+    similarity_candidate_oversample: int = 10
+    similarity_max_k: int = 20
+
 
 @lru_cache
 def get_settings() -> Settings:

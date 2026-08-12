@@ -201,3 +201,33 @@ invented denominator. See ARCHITECTURE.md §15–18 for the full design,
 including how duplicate cats of the same breed are counted honestly
 (every cat counts toward your total; only genuinely new breeds move
 the completion percentage).
+
+## Cats Like This — visual similarity search
+
+Every analyzed cat gets a real, computer-vision **visual embedding** —
+a 576-number fingerprint of how the photo actually looks, produced by
+an ImageNet-pretrained model (not this project's own breed classifier,
+and not a lookup by breed or color label). Cats with similar-looking
+photos land close together in that number space; "Cats Like This 🐾"
+(shown on a Cat Card, your collection, and any public `/cat/[id]`
+page) searches for the closest ones using
+[FAISS](https://github.com/facebookresearch/faiss), Meta's vector
+search library.
+
+- Every result shows a real **"N% visually similar"** number — the
+  mathematical cosine similarity between two embeddings, never a
+  fabricated or hand-picked score. Breed and shared fur colors are
+  shown alongside each result as *context*, not as what similarity is
+  computed from.
+- Respects the same privacy model as the rest of the collection: you
+  can only ever match against public cats plus (if signed in) your own
+  — never someone else's private cat, never leaked metadata.
+- If the embedding model or search index isn't available for some
+  reason, the section says so honestly rather than showing a made-up
+  result.
+- A collapsed "How Similarity Works" note explains the four-step
+  pipeline (embed → nearby in vector space → FAISS search → closest
+  eligible cats) for anyone curious, without getting in the way of
+  everyone else. See ARCHITECTURE.md §19–22 for the full architecture,
+  the exact preprocessing/normalization, and measured performance
+  numbers.

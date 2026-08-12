@@ -547,9 +547,59 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   daily/recurring engagement mechanics, AI image generation, social
   feed, chat, OAuth.
 
-## Phase 11 — Similarity Search
-- ⬜ Embedding generation + FAISS index
-- ⬜ `/api/cats/{id}/similar` endpoint + UI
+## Phase 11 — MeowVerse Similarity Engine: Visual Embeddings & Cat Discovery ✅
+- ✅ Real embedding pipeline — ImageNet-pretrained MobileNetV3-Small
+  (not the project's own breed-fine-tuned weights, and not a new model
+  trained from scratch), 576-dim, L2-normalized, deterministic
+  preprocessing. See ARCHITECTURE.md §19.
+- ✅ Layered abstraction exactly as specified: `EmbeddingModel` →
+  `CatEmbeddingService` → `VectorIndex` → `SimilarityService` → API →
+  frontend — each layer swappable without touching the ones above it.
+- ✅ `FAISSVectorIndex` (`IndexIDMap2` + `IndexFlatIP`, exact cosine
+  similarity via inner product on normalized vectors) — persisted,
+  survives a restart, reload verified, dimension-mismatch and
+  corrupt-file detection verified.
+- ✅ Content-hash deduplication — identical image bytes reuse one FAISS
+  vector across multiple analyses rather than adding duplicates.
+- ✅ Privacy: every candidate re-checked (public OR caller-owned) at
+  the `SimilarityService` layer before it can reach a response; guests
+  see public cats only. See ARCHITECTURE.md §21.
+- ✅ `GET /api/v1/analyses/{id}/similar` — self-exclusion, k capped at
+  20, post-retrieval breed/rarity/favorite filters, honest
+  `search_mode: "embedding" | "unavailable"` (never a fabricated
+  result when the model/index isn't available).
+- ✅ "Cats Like This 🐾" section (analyze results page, public
+  `/cat/[id]`, `/collection/[id]`) — real similarity percentages, a
+  rotating cute loader, an honest "one of a kind" empty state driven
+  by the actual result, and a small "How Similarity Works" explainer.
+- ✅ `python -m app.cli.similarity_index {build,rebuild,verify}` —
+  dev/admin-only, never HTTP-exposed; run for real against this
+  project's own accumulated dev data (869 analyses backfilled, 980
+  total rows verified with zero problems).
+- ✅ Backend: 211/211 tests (was 170) including controlled-vector math
+  tests (identical/orthogonal/ranked-distance vectors) per spec §28,
+  not just HTTP-response tests. Frontend: 96/96 tests (was 85).
+  Playwright E2E: 14/14 steps against real dev servers, zero console
+  errors, real photos from the Oxford-IIIT Pet dataset already in this
+  repo (not synthetic fixtures).
+- ✅ Qualitative validation with real, non-cherry-picked photos (4
+  breeds × 3 images) — reported honestly including the one query that
+  didn't cluster with its own breed. See PROJECT_STATUS.md.
+- 🐛 Two real bugs found and fixed this phase (not hypothetical): (1)
+  torch and faiss-cpu both bundle their own OpenMP runtime, aborting
+  the interpreter outright when both load in one process on Windows —
+  fixed with the standard `KMP_DUPLICATE_LIB_OK=TRUE` workaround set
+  in `app/__init__.py`. (2) `faiss.IndexIDMap` (the wrapper originally
+  used) doesn't support `reconstruct()` at all — switched to
+  `IndexIDMap2`, which maintains the reverse map needed for it.
+- ⬜ pgvector — deliberately not introduced; the spec explicitly said
+  not to unless existing infrastructure already required it, and it
+  doesn't yet. `VectorIndex` is shaped so it's a future drop-in.
+- ⬜ Formal retrieval benchmark (recall@K, etc.) — not performed; no
+  reliable ground-truth similarity labels exist for this dataset (breed
+  labels are not a similarity ground truth, and the spec explicitly
+  warns against conflating the two). Documented honestly in
+  PROJECT_STATUS.md rather than fabricated.
 
 ## Phase 12 — Grad-CAM Explainability
 - ⬜ Heatmap generation for breed classifier

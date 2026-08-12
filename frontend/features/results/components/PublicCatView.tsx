@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
+
 import { CatCard } from "./CatCard";
 
 import type { AnalysisResult } from "@/types/analysis";
@@ -17,6 +19,7 @@ export function PublicCatView({ result }: { result: AnalysisResult }) {
       >
         Discover your own cat
       </Link>
+      <CatsLikeThis analysisId={result.id} />
     </div>
   );
 }

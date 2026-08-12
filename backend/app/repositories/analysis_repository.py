@@ -70,6 +70,18 @@ async def get_owned_analysis(
     return row
 
 
+async def get_many_by_ids(db: AsyncSession, ids: list[uuid.UUID]) -> list[CatAnalysisModel]:
+    """Unfiltered by ownership/visibility — used by
+    `similarity_service.py`, which applies its own eligibility check
+    per row immediately after (public OR caller-owned) before anything
+    here reaches an API response. Never call this from a route handler
+    directly."""
+    if not ids:
+        return []
+    stmt = select(CatAnalysisModel).where(CatAnalysisModel.id.in_(ids))
+    return list((await db.execute(stmt)).scalars().all())
+
+
 async def set_public(
     db: AsyncSession, analysis_id: uuid.UUID, user_id: uuid.UUID
 ) -> CatAnalysisModel | None:

@@ -11,6 +11,7 @@ from app.ml.fur_color import get_fur_color_analyzer
 from app.repositories.analysis_repository import save_analysis
 from app.schemas.analysis import AnalysisResult, BreedPrediction, ColorSwatch
 from app.schemas.profile import CatSignals
+from app.services.embedding_service import embed_and_index
 from app.services.profile_service import generate_cat_profile
 from app.storage import get_image_storage
 
@@ -165,6 +166,24 @@ async def analyze_image(
         # don't all inherit from SQLAlchemyError — none of them should
         # ever take down the analyze endpoint.
         logger.warning("Failed to persist analysis — continuing without an id", exc_info=True)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return result
+
+    try:
+        # Its own try/except, separate from analysis persistence above —
+        # an embedding failure must never be logged/handled as if the
+        # analysis itself failed to save (Phase 11 spec: "Cats Like
+        # This" is best-effort, same philosophy as image storage).
+        embedding_row, _latency = await embed_and_index(db, row.id, image, image_bytes)
+        result.embedding_available = embedding_row is not None
+    except Exception:
+        logger.warning(
+            "Embedding generation failed — continuing without visual similarity",
+            exc_info=True,
+        )
         try:
             await db.rollback()
         except Exception:
