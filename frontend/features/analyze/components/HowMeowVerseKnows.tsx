@@ -67,7 +67,9 @@ export function HowMeowVerseKnows({ result }: { result: AnalysisResult }) {
       source: "Computer vision model",
       detail:
         result.breed_mode === "trained"
-          ? "A transfer-learning image classifier (MobileNetV3) trained on real cat photos."
+          ? "A transfer-learning image classifier (MobileNetV3) trained on real cat photos. " +
+            "See \"Why this breed?\" below for a real Grad-CAM visual explanation of which " +
+            "regions of your photo contributed most to this prediction."
           : "Demo mode right now — no trained model weights were available for this request.",
     },
     {

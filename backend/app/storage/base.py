@@ -19,6 +19,15 @@ class ImageStorageProvider(ABC):
         photos aren't secret, only the surrounding analysis data is
         access-controlled)."""
 
+    @abstractmethod
+    async def load(self, url: str) -> bytes | None:
+        """Reverses `save`'s URL back into the original bytes — added
+        in Phase 12 for Grad-CAM, which needs the actual uploaded photo
+        (not just its URL) to run inference on. Returns `None` if the
+        file can't be found/read (never raises for that) — same
+        best-effort philosophy as `save`. An S3-compatible provider
+        would implement this as a GET against the object store."""
+
     @property
     @abstractmethod
     def is_available(self) -> bool:

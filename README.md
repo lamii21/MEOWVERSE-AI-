@@ -231,3 +231,39 @@ search library.
   everyone else. See ARCHITECTURE.md §19–22 for the full architecture,
   the exact preprocessing/normalization, and measured performance
   numbers.
+
+## Why MeowVerse thinks this is a... — real Grad-CAM explanations
+
+MeowVerse doesn't only predict a breed — it can show you **which
+regions of your cat's photo actually contributed most to that
+prediction**, using [Grad-CAM](https://arxiv.org/abs/1610.02391)
+("Gradient-weighted Class Activation Mapping"), implemented from
+scratch against the real trained breed classifier's real gradients —
+never a decorative heatmap, never a hard-coded region, never generated
+from the breed name alone.
+
+1. Your photo is passed through the same breed classifier that made
+   the prediction.
+2. MeowVerse computes the gradients of that specific predicted breed's
+   score, flowing back to the model's last layer that still has
+   spatial information.
+3. Those gradients become an importance weight per feature, producing
+   a heatmap of the regions that mattered most.
+4. The heatmap is colorized and blended onto your original photo — you
+   can switch between the **Original**, **AI Focus** (heatmap alone),
+   and **Overlay** views.
+
+Click **"Why this breed?"** on any analyzed cat to generate it
+on-demand (it's never computed automatically — only when you ask). The
+**prediction confidence** (a plain probability, e.g. "91%") and the
+**Grad-CAM visualization** are always shown as two separate things —
+one is never mislabeled as the other. Grad-CAM is described honestly
+throughout as *"an interpretability visualization showing regions that
+contributed strongly to the prediction"* — never as proof, certainty,
+or a causal explanation of your cat's actual breed. If the analysis
+was made in demo mode (no trained model available at the time),
+MeowVerse says so plainly instead of faking a result. See
+ARCHITECTURE.md §23–24 for the exact algorithm, target layer, and
+privacy/caching design, and PROJECT_STATUS.md for real measured
+performance and a from-real-photos qualitative review (successes and
+failures both included).

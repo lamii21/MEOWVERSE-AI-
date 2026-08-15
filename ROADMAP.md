@@ -601,9 +601,62 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   warns against conflating the two). Documented honestly in
   PROJECT_STATUS.md rather than fabricated.
 
-## Phase 12 — Grad-CAM Explainability
-- ⬜ Heatmap generation for breed classifier
-- ⬜ "Why did the AI predict this?" UI panel
+## Phase 12 — MeowVerse Explainable AI: Real Grad-CAM Breed Explanations ✅
+- ✅ Real Grad-CAM (Selvaraju et al., 2017) implemented from scratch
+  with PyTorch forward/backward hooks against the actual fine-tuned
+  breed classifier's real weights — not the `pytorch-grad-cam` library
+  pre-staged in `requirements-ml.txt` (deliberately not used, so every
+  step stays auditable/testable), not a decorative or hard-coded
+  heatmap. Target layer (`features[-1]`, a `(576,7,7)` feature map)
+  verified by inspecting real tensor shapes, not assumed. See
+  ARCHITECTURE.md §23.
+- ✅ Confidence vs. Grad-CAM intensity kept strictly separate
+  everywhere — schema, DB row, and UI.
+- ✅ `breed_mode` honesty preserved: a demo-mode analysis always gets
+  an honest `"unavailable"` explanation with a real reason, never a
+  fabricated heatmap.
+- ✅ `POST /api/v1/analyses/{id}/explanation` — on-demand only (never
+  during analysis), ownership-enforced identically to every other
+  analysis endpoint, cached on `(analysis_id, target_class,
+  breed_model_version)` so a retrained classifier can never silently
+  serve a stale explanation. See ARCHITECTURE.md §24.
+- ✅ Real heatmap + alpha-blended overlay images, generated with OpenCV
+  and stored through the existing `ImageStorageProvider` (extended
+  with a new `load()` method to read the original photo back out —
+  no second storage system).
+- ✅ "Why MeowVerse thinks this is a [breed]" section on the analyze
+  results page, public `/cat/[id]`, and `/collection/[id]` — a
+  Original/AI Focus/Overlay switcher, a plain-language explanation, and
+  an explicit "not proof, certainty, or a causal explanation" disclaimer.
+- ✅ Backend: 246/246 tests (was 211) — including controlled Grad-CAM
+  math tests (target layer, gradient capture, ReLU, normalization,
+  determinism, and a real "different target class → different heatmap"
+  gradient-dependence test per spec §23), ruff clean. Frontend: 106/106
+  tests (was 96), lint/build clean.
+- ✅ Playwright E2E (14 steps) against real dev servers with a real
+  trained model and real Oxford-IIIT Pet photos — including cache
+  reuse, cross-user denial, public-page access, mobile, and reduced
+  motion, zero console errors.
+- ✅ Real image qualitative validation across 5 breeds (British
+  Shorthair, Siamese, Persian, Bengal, Sphynx) with real photos, not
+  cherry-picked — including one real misprediction (a Bengal photo
+  classified as Egyptian Mau at 61%) reported honestly rather than
+  hidden. See PROJECT_STATUS.md.
+- 🐛 Found and fixed two real pre-existing (Phase 8) hydration
+  mismatches under `prefers-reduced-motion`, surfaced by this phase's
+  own reduced-motion QA on the public `/cat/[id]` page — same root
+  cause as Phase 10's `AuthCard` fix (a Framer Motion prop that
+  disappeared entirely under reduced motion, changing what the server
+  and a reduced-motion client each rendered): `useCardTilt`'s
+  `style`/`handlers` and `CatCard`'s `whileTap`. Both fixed by keeping
+  the prop structurally present always and only changing its *value*
+  to a no-op under reduced motion.
+- ✅ Optional faithfulness sanity check implemented (spec §27): masking
+  the top 15% of each photo's heatmap and re-measuring confidence in
+  the same target class showed a real mean drop of +0.558 across 5
+  real photos (4 of 5 individually dropped meaningfully, one barely
+  moved — reported honestly, not smoothed over). Explicitly documented
+  as a sanity check, not proof of causality. See PROJECT_STATUS.md.
 
 ## Phase 13 — Creative Generation
 - ⬜ `ImageGenerationProvider` interface + fallback UI

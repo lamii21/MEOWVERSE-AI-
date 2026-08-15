@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { RequireAuth } from "@/features/auth/components/RequireAuth";
+import { GradCamExplanation } from "@/features/explanation/components/GradCamExplanation";
 import { CatCard } from "@/features/results/components/CatCard";
 import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
 import { AnalysisApiError, fetchPublicAnalysis } from "@/services/analyses";
@@ -46,6 +47,7 @@ function CollectionDetailContent() {
       )}
 
       {query.data && <CatCard result={query.data} />}
+      {query.data && <GradCamExplanation result={query.data} />}
       {query.data && <CatsLikeThis analysisId={query.data.id} />}
     </div>
   );

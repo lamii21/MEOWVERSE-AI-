@@ -144,11 +144,22 @@ export function CatCard({
     <div className="relative w-full max-w-sm">
       <RarityAura treatment={rarity.treatment} />
 
+      {/* `whileTap` stays structurally present regardless of
+       * `reduceMotion` (only its `scale` value changes to a no-op,
+       * 1 instead of 0.98) — Framer Motion adds `tabIndex="0"` to a
+       * motion.div whenever a `while*` gesture prop is present, so
+       * conditionally omitting the prop itself (the previous code:
+       * `whileTap={reduceMotion ? undefined : {...}}`) made the
+       * server's default (`reduceMotion` false, no window) and a
+       * reduced-motion client disagree on `tabIndex` — a real
+       * hydration mismatch found on /cat/[id] via Playwright's
+       * `reducedMotion: "reduce"` context option. Same fix shape as
+       * `AuthCard`'s and `useCardTilt`'s reduced-motion fixes. */}
       <motion.div
         ref={tiltRef}
         {...tilt.handlers}
         style={tilt.style}
-        whileTap={reduceMotion ? undefined : { scale: 0.98 }}
+        whileTap={{ scale: reduceMotion ? 1 : 0.98 }}
         className="relative"
       >
         <div

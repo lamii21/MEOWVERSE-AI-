@@ -39,3 +39,19 @@ class LocalImageStorageProvider(ImageStorageProvider):
         self._directory.mkdir(parents=True, exist_ok=True)
         (self._directory / filename).write_bytes(image_bytes)
         return f"/media/{filename}"
+
+    async def load(self, url: str) -> bytes | None:
+        if not url.startswith("/media/"):
+            return None
+        path = self._directory / url.removeprefix("/media/")
+        try:
+            # Guard against path traversal (`/media/../../etc/passwd`)
+            # escaping the storage directory — resolve() collapses any
+            # `..` segments, then confirm the result is still inside
+            # `self._directory` before ever reading it.
+            resolved = path.resolve()
+            if not resolved.is_relative_to(self._directory.resolve()):
+                return None
+            return resolved.read_bytes()
+        except OSError:
+            return None

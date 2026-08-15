@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { GradCamExplanation } from "@/features/explanation/components/GradCamExplanation";
 import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
 
 import { CatCard } from "./CatCard";
@@ -19,6 +20,7 @@ export function PublicCatView({ result }: { result: AnalysisResult }) {
       >
         Discover your own cat
       </Link>
+      <GradCamExplanation result={result} />
       <CatsLikeThis analysisId={result.id} />
     </div>
   );

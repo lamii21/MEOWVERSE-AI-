@@ -1,263 +1,277 @@
 # MeowVerse AI — Project Status
 
-_Last updated: 2026-08-12_
+_Last updated: 2026-08-15_
 
 ## Current Phase
 
-**Phase 11 — MeowVerse Similarity Engine: Visual Embeddings & Cat
-Discovery: complete and verified end-to-end.** Phase 12 is next, not
-yet started.
+**Phase 12 — MeowVerse Explainable AI: Real Grad-CAM Breed
+Explanations: complete and verified end-to-end.** Phase 13 is next,
+not yet started.
 
 ## What Exists
 
 - `backend/` —
-  - `app/ml/embedding_model.py` — `EmbeddingModel`, a real
-    ImageNet-pretrained `mobilenet_v3_small` (NOT this project's own
-    breed-fine-tuned weights) used purely as a feature extractor:
-    `predict()` runs `features` + `avgpool` and stops before the
-    classification head, returning a 576-dim, L2-normalized `float32`
-    vector. Same honest-fallback contract as every other model here —
-    `is_available=False` (never a fake/random vector) if torch isn't
-    installed or the pretrained weights can't load.
-  - `app/similarity/vector_index.py` — `VectorIndex` ABC +
-    `FAISSVectorIndex` (`faiss.IndexIDMap2(faiss.IndexFlatIP(576))`,
-    exact cosine similarity via inner product on normalized vectors).
-    Write-through persistence to `data/similarity_index.faiss`; a
-    dimension mismatch or corrupt file on load marks it unavailable
-    rather than silently wrong or crashing.
-  - `app/models/embedding.py` — `CatEmbeddingModel`: maps one analysis
-    to a FAISS `vector_id` + a sha256 `content_hash` + the
-    `embedding_model`/`embedding_version`/`embedding_dim` that
-    produced it. The raw vector itself is never stored in Postgres —
-    only in the FAISS index, reconstructed by id when needed.
-  - `app/repositories/embedding_repository.py` — content-hash dedup
-    lookup, vector_id reverse-mapping, reference-count for safe
-    removal, a simple monotonic `vector_id` counter.
-  - `app/services/embedding_service.py` — `embed_and_index`: hashes
-    the image, reuses an existing vector for identical content instead
-    of re-embedding, otherwise runs the model and adds to the index.
-    Best-effort — a failure here never fails the analyze request.
-  - `app/services/similarity_service.py` — `find_similar_cats`: the
-    one place similarity logic lives. Resolves + authorizes the source
-    cat → reconstructs its query vector from FAISS → over-fetches
-    candidates → resolves them back to real rows → applies privacy
-    (public OR caller-owned) + self-exclusion + optional
-    breed/rarity/favorite filters → truncates to k → builds the
-    response. Returns `search_mode: "unavailable"` (never fabricates)
-    when the model, index, or this specific cat's embedding isn't
-    available.
-  - `app/schemas/similarity.py` — `SimilarCat` (analysis_id, cat_name,
-    image_url, breed, rarity, `visual_similarity` [0-1, clamped ≥0],
-    shared_colors, is_favorite [owner-gated], created_at),
-    `SimilarityResponse` (source_cat, similar_cats, search_mode,
-    embedding_model).
-  - `app/api/v1/similarity.py` — `GET
-    /api/v1/analyses/{id}/similar?k=&breed=&rarity=&favorites_only=`.
-    `k` hard-capped at 20 by the query parameter's own validation.
-  - `app/cli/similarity_index.py` — `build`/`rebuild`/`verify`, dev/
-    admin-only, never HTTP-exposed. `verify` checks for duplicate
-    mappings, missing analysis records, stale model/version rows,
-    dimension mismatches, and orphaned vectors — reports and exits
-    non-zero, never silently repairs.
-  - `app/__init__.py` — now sets `KMP_DUPLICATE_LIB_OK=TRUE` before
-    anything else in the package can import torch or faiss (see Errors
-    below — a real crash, not a hypothetical).
-  - `app/services/analysis_service.py` — `analyze_image` now also
-    computes and indexes an embedding (its own try/except, separate
-    from analysis persistence, so an embedding failure is never
-    conflated with an analysis-save failure in logs).
-  - `app/schemas/analysis.py` — the previously-stubbed
-    `embedding_available: bool` field (present since early phases,
-    always `False`) is now real: `True` exactly when this analysis's
-    embedding was actually computed and indexed.
-  - Migration `8903bf7a8de1` — adds `cat_embeddings` only; no changes
-    to any existing table. Verified via upgrade → downgrade → upgrade.
-  - Tests: `test_embedding_model.py` (dimension, L2-normalization,
-    determinism, dtype), `test_vector_index.py` (controlled-vector
-    math: identical/orthogonal/opposite/ranked-distance vectors per
-    spec §28 — not just HTTP assertions — plus persistence, corruption,
-    dimension-mismatch, remove/reconstruct), `test_embedding_service.py`
-    (hash determinism, duplicate-content dedup, graceful degradation),
-    `test_similarity.py` (self-exclusion, k-capping, ordering, privacy
-    across guest/owner/stranger, duplicate-image near-1.0 matching,
-    post-retrieval filters). **211/211 backend tests passing** (was
-    170), ruff clean.
+  - `app/ml/breed_classifier.py` — `BreedClassifier` gained
+    `explain()`, a real Grad-CAM implementation (forward/backward
+    hooks on `features[-1]`, verified to output `(576, 7, 7)` by
+    inspecting real shapes before writing any code) and a public
+    `class_names` property. `GRAD_CAM_TARGET_LAYER = "features.12"` and
+    a `GradCamResult` dataclass (target class, confidence, the
+    normalized+resized heatmap array) live alongside the existing
+    `predict()` on the same class — one model, one set of loaded
+    weights, two things it can do with them.
+  - `app/ml/heatmap_visualization.py` — new: colorizes a heatmap with
+    OpenCV's `COLORMAP_JET` and alpha-blends it onto the original
+    photo (per-pixel alpha proportional to importance, capped at 0.6
+    so the photo is never fully hidden).
+  - `app/models/explanation.py` — `CatExplanationModel`: one row per
+    `(analysis, target_class, breed_model_version)` — the whole
+    caching/staleness contract lives in that unique constraint.
+  - `app/repositories/explanation_repository.py` — cache lookup
+    (`get_cached`), `create`.
+  - `app/services/explanation_service.py` — `get_explanation()`, the
+    one orchestration point: resolve+authorize the source analysis →
+    refuse anything not genuinely `breed_mode == "trained"` → default
+    `target_class` to the breed already shown to the user (never
+    silently re-predict a different one) → check the cache → on a
+    miss, load the real stored photo, run real Grad-CAM, render +
+    store the heatmap/overlay, cache the result. Every failure path
+    returns an honest `mode: "unavailable"` + `reason`, never a stack
+    trace.
+  - `app/schemas/explanation.py` — `CatExplanation` (mode, reason,
+    method, target_class, target_class_index, confidence, target_layer,
+    breed_model_version, heatmap_url, overlay_url, image dimensions,
+    created_at, cached) — every field `None` when unavailable, never a
+    placeholder standing in for a real value.
+  - `app/api/v1/explanation.py` — `POST
+    /api/v1/analyses/{id}/explanation`, optional `target_class` body
+    field (validated against the classifier's real known classes, 422
+    if unrecognized), rate-limited, guest-accessible on a public
+    analysis via the same visibility rule as every other analysis
+    endpoint.
+  - `app/storage/base.py`/`local.py` — `ImageStorageProvider` gained
+    `load(url) -> bytes | None`, the inverse of `save()` — needed to
+    re-read the original photo back out for Grad-CAM. Local
+    implementation includes an explicit path-traversal guard before
+    ever reading a file.
+  - Migration `883a3ad9af8c` — adds `cat_explanations` only, no
+    changes to any existing table. Verified via a real
+    upgrade → downgrade → upgrade cycle.
+  - Tests: `test_grad_cam.py` (target layer, activation/gradient
+    shapes and finiteness, ReLU applied, normalization, determinism, a
+    real gradient-dependence test — two different target classes on
+    the same image must produce different heatmaps — a real
+    parametrized qualitative run across 5 breeds with real dataset
+    photos, and the faithfulness sanity check below),
+    `test_explanation.py` (happy path, caching/cache-key correctness,
+    target-class validation, ownership across owner/stranger/guest/
+    public, demo-mode and missing-photo honesty). **246/246 backend
+    tests passing** (was 211), ruff clean.
 - `frontend/` —
-  - `types/similarity.ts`, `services/similarity.ts` — typed client for
-    the endpoint above.
-  - `features/similarity/components/SimilarCatCard.tsx` — compact
-    result tile (image, name, breed, rarity, "N% visually similar").
-  - `features/similarity/components/CatsLikeThis.tsx` — the "Cats Like
-    This 🐾" section: a rotating cute loading message, an honest
-    "Your cat might be one of a kind. 🐾" empty state (only shown when
-    the search genuinely ran and found nothing), a distinct
-    "unavailable" message when the model/index isn't ready, real error
-    handling, and the results grid.
-  - `features/similarity/components/HowSimilarityWorks.tsx` —
-    collapsed-by-default 4-step technical explainer (spec §36).
-  - Wired into three places (spec §16/§19): the analyze results page
-    (`ResultExperience.tsx`), the public `/cat/[id]` page
-    (`PublicCatView.tsx`), and the owner's `/collection/[id]` page.
-    Implemented as an always-visible auto-loading section rather than
-    a separate "Find Similar Cats" button — the results are already
-    there without an extra click; documented as a deliberate UX choice
-    naming the same underlying reusable component.
-  - 3 new test files (`SimilarCatCard.test.tsx`, `CatsLikeThis.test.tsx`
-    covering loading/empty/unavailable/error/success/real-percentage
-    states). **96/96 frontend tests passing** (was 85), lint/build
-    clean.
+  - `types/explanation.ts`, `services/explanation.ts` — typed client
+    for the endpoint above.
+  - `features/explanation/components/GradCamExplanation.tsx` — "Why
+    MeowVerse thinks this is a [breed]": a manually-triggered
+    (`useMutation`, not auto-loaded) "Why this breed?" button, a
+    3-way Original/AI Focus/Overlay switcher (`role="radiogroup"`,
+    same accessible pattern as the collection page's rarity filter),
+    an honest unavailable state with the real server-provided reason,
+    an error state, real descriptive alt text per view, and an
+    explicit "not proof, certainty, or a causal explanation"
+    disclaimer next to the (clearly separate) real confidence number.
+  - Wired into the same three places Phase 11's "Cats Like This" is:
+    the analyze results page, the public `/cat/[id]` page, and the
+    owner's `/collection/[id]` page.
+  - `features/analyze/components/HowMeowVerseKnows.tsx` — the breed
+    row now mentions the Grad-CAM section below it.
+  - 1 new test file (`GradCamExplanation.test.tsx`, 10 tests covering
+    loading/success/unavailable/error states, view switching, real
+    confidence display, accessible alt text, and the disclaimer).
+    **106/106 frontend tests passing** (was 96), lint/build clean.
 
-## Real Results (Phase 11)
+## Real Results (Phase 12)
 
-- **Both suites green**: 211/211 backend (pytest, real Postgres, real
-  torch/FAISS inference — no mocks), 96/96 frontend.
-- **The `similarity_index` CLI was run for real** against this
-  project's own accumulated dev database (not a toy dataset): `build`
-  backfilled embeddings for 869 previously-unembedded analyses (real
-  photos already on disk from earlier phases' testing);
-  `verify` afterward reported **980 embedding rows, index size 24
-  distinct vectors, zero problems found**.
-- **Qualitative validation with real photos** (Phase 11 spec §30) —
-  4 breeds × 3 real Oxford-IIIT Pet photos each (Sphynx, Persian,
-  Bengal, Russian Blue; the same dataset this project's own breed
-  classifier was trained on, already present in the repo), first-3-
-  alphabetical per breed, **not hand-picked for a flattering result**.
-  Same-breed images landed in each other's top-3 nearest neighbors in
-  18 of 36 possible neighbor slots — well above chance, and Persian
-  images clustered especially tightly (0.82-0.86 cosine similarity,
-  consistent with their visually distinctive long white coat).
-  Reported honestly alongside the imperfect cases: one Bengal image
-  didn't rank any other Bengal in its own top-3, and Sphynx/Russian
-  Blue cross-matched somewhat (both are short/bare-coated, plain-
-  colored cats — a visually defensible confusion, not a bug). This is
-  a qualitative sanity check over 12 images, explicitly **not** a
-  formal retrieval benchmark.
-- **Performance, measured, not estimated**:
-  - Embedding generation: mean 73.6ms, range 60.6-101.9ms (n=12,
-    single-threaded CPU inference, warm process).
-  - FAISS search: mean 0.886ms, p95 0.966ms (k=20, 24 real indexed
-    vectors, warm process).
-  - Full `POST /api/v1/analyses` (breed + colors + profile + embed +
-    persist), warm process: 1.24s.
-  - Full `GET /api/v1/analyses/{id}/similar` end-to-end (DB round-trips
-    + FAISS search + privacy filtering), warm process: mean ~370ms
-    over 10 requests (335-568ms range) — DB round-trip overhead
-    dominates this, not the sub-millisecond FAISS search itself; noted
-    as a real, honest number, not a target.
+- **Both suites green**: 246/246 backend (pytest, real trained
+  weights, real photos — no mocks for the actual Grad-CAM math),
+  106/106 frontend.
+- **The math was verified directly against the real trained model**
+  before any service/API code was written: a real forward+backward
+  pass on a real British Shorthair photo produced finite gradients, a
+  correctly-shaped `(7, 7)` CAM, and a normalized `[0, 1]` heatmap —
+  confirmed via a standalone script, not assumed from documentation.
+- **Real image qualitative validation** (spec §25-26) — 5 breeds
+  (British Shorthair, Siamese, Persian, Bengal, Sphynx), 2 real photos
+  each, all logged honestly:
+  - Every prediction/explanation ran cleanly (finite heatmap, valid
+    confidence) on all 10 photos.
+  - 9 of 10 photos were correctly classified by the real model; one
+    Bengal photo (`Bengal_105.jpg`) was misclassified as Egyptian Mau
+    at 61% confidence — reported as-is, not excluded from the sample.
+  - Heatmap peaks landed at finite, well-formed coordinates on every
+    photo; no formal "is this the right region" ground truth exists
+    (there is none for Grad-CAM), so peak *location quality* is
+    reported qualitatively (see below), not asserted as pass/fail.
+  - Directly viewed several real overlays (not just their pixel
+    statistics) — the British Shorthair and Siamese examples showed
+    the heatmap concentrated clearly on the cat's face/head/chest, not
+    the background; documented as a real, positive qualitative
+    observation, not a guarantee for every photo.
+- **Faithfulness sanity check performed** (spec §27, optional):
+  masking the top 15% of each photo's heatmap (replaced with the
+  image's own mean color) and re-measuring confidence in the *same*
+  target class, across 5 real British Shorthair photos:
+
+  | Photo | Original confidence | Masked confidence | Drop |
+  |---|---|---|---|
+  | British_Shorthair_107.jpg | 0.955 | 0.463 | +0.492 |
+  | British_Shorthair_121.jpg | 0.981 | 0.085 | +0.896 |
+  | British_Shorthair_154.jpg | 1.000 | 0.997 | +0.003 |
+  | British_Shorthair_161.jpg | 1.000 | 0.580 | +0.420 |
+  | British_Shorthair_169.jpg | 0.995 | 0.013 | +0.982 |
+
+  Mean drop: **+0.558**. Two of five photos even flipped the model's
+  top-1 prediction to a different breed once the Grad-CAM-identified
+  region was removed. One photo barely moved — reported honestly, not
+  smoothed into the average silently. This is a real signal that the
+  heatmap correlates with what the model relies on; it is explicitly
+  **not** proof of causal explanation (masking also changes
+  surrounding context, and nothing about a CNN's response to a
+  modified image is strictly decomposable into "what changed").
+- **No formal retrieval-style "explainability accuracy" metric was
+  computed or claimed** — Grad-CAM has no such automated ground truth,
+  and the spec explicitly warns against inventing one.
+- **Performance, measured, not estimated** (warm process, real trained
+  model, real photos):
+  - Grad-CAM generation (`explain()`, forward+backward+CAM): mean
+    61.0ms, range 43.4–87.0ms (n=10).
+  - Heatmap + overlay rendering (OpenCV colorize + alpha blend): mean
+    39.4ms, range 7.9–301.1ms (n=10; the high end was one first-call
+    OpenCV JIT/cache warm-up, not representative of steady state).
+  - Full `POST /api/v1/analyses/{id}/explanation`, cache miss (image
+    load + Grad-CAM + render + store + DB write): **505ms**.
+  - Same endpoint, cache hit: mean **~220ms** over 5 requests
+    (DB lookup + response serialization only — no Grad-CAM computation
+    at all).
   - A cold process pays a one-time ~40s `import torch` cost on its
-    *first* embedding-touching request (confirmed directly, twice) —
-    the process-wide singleton pattern (matching `get_breed_classifier`)
-    means every request after that first one is warm.
+    *first* request touching the classifier singleton (same
+    architectural fact already documented in Phase 11) — every request
+    after that is warm.
 - **Verified end-to-end via a live, scripted Playwright run** (14
-  steps, real photos, real dev servers): register → create 4 real cat
-  analyses (3 Persians + 1 Sphynx) → confirm all 4 got real embeddings
-  → open a Persian's Cat Card → the "Cats Like This" section loads
-  real results (the other 2 Persians at 86%/84%, the Sphynx at 58%,
-  three unrelated cats at 0%) → confirm the source cat is excluded →
-  confirm descending similarity order in both the API and the
-  rendered UI → confirm a second, stranger user gets a 404 trying to
-  query the first user's private cat → confirm a brand-new user's
-  brand-new cat correctly gets a real (not hardcoded) empty/results
-  state → click into a similar cat and back → refresh and confirm
-  results persist. All 14 steps passed, **zero console errors**.
-- **Responsive** (320/375/768/1440px) and **reduced-motion** verified
-  on a real page with "Cats Like This" rendered — zero horizontal
-  overflow, zero console errors under `prefers-reduced-motion`.
+  steps, a real British Shorthair photo, real dev servers): register →
+  analyze a real photo → confirm `breed_mode: "trained"` → open the
+  result → click "Why this breed?" → confirm the explanation loads →
+  switch Original → AI Focus → Overlay (confirming each view's real,
+  descriptive alt text) → refresh → revisit and confirm the *second*
+  request reuses the cache (`cached: true`) → confirm a second,
+  stranger user gets a 404 attempting the same analysis's explanation
+  → share the cat and confirm a logged-out guest can view the public
+  explanation → confirm zero horizontal overflow at 375px → confirm
+  zero console errors under `prefers-reduced-motion`. All 14 steps
+  passed, zero console errors throughout.
+- **Responsive verified at all 6 required breakpoints**
+  (320/375/390/768/1024/1440px) on a live page with the explanation
+  section expanded — zero horizontal overflow at any width.
 
-## Two Real Bugs Found and Fixed This Phase
+## Two Real Pre-Existing Bugs Found and Fixed This Phase
 
-1. **torch + faiss-cpu OpenMP conflict, a hard process crash.** Both
-   bundle their own copy of Intel's OpenMP runtime on Windows; loading
-   both in one process aborts the interpreter outright
-   (`Fatal Python error: Aborted`) the moment the second one is
-   imported — hit directly while running `test_vector_index.py`
-   (imports faiss) followed by `test_embedding_model.py` (imports
-   torch) in the same pytest session. Fixed with the standard,
-   documented workaround (`KMP_DUPLICATE_LIB_OK=TRUE`), set in
-   `app/__init__.py` — the one place guaranteed to run before any
-   `app.*` submodule, so the production app, every test, and the CLI
-   are all covered with no import-order race.
-2. **`faiss.IndexIDMap` doesn't support `reconstruct()`.** Confirmed
-   directly (`RuntimeError: reconstruct not implemented for this type
-   of index`) — the plain ID-mapping wrapper supports add/search/remove
-   but not reconstruction-by-id at all. Switched to `IndexIDMap2`,
-   which maintains the reverse map that makes it work. Found before
-   this ever reached a real request, via the vector-index unit tests.
+Both surfaced by this phase's own reduced-motion QA on the public
+`/cat/[id]` page (one of Phase 12's three integration points) — same
+root cause as Phase 10's `AuthCard` fix, in components this phase
+didn't otherwise touch (both are Phase 8 code):
+
+1. **`useCardTilt`**: `style`/`handlers` were entirely omitted (`{}`)
+   under `prefers-reduced-motion`, which also removes the
+   `tabIndex="0"` Framer Motion automatically adds to a `motion.div`
+   with pointer handlers attached — server (default `reduceMotion:
+   false`, no `window`) rendered `tabIndex="0"`, a reduced-motion
+   client didn't, a genuine hydration mismatch. Fixed by keeping
+   `style`/`handlers` structurally present whenever `enabled` is true
+   (a plain, SSR-safe prop) and moving the `reduceMotion` check
+   *inside* `handlePointerMove` instead, where it's a pure runtime
+   no-op rather than something that changes rendered markup.
+2. **`CatCard`'s `whileTap`**: same shape of bug —
+   `whileTap={reduceMotion ? undefined : {...}}` disappeared entirely
+   under reduced motion, again changing whether Framer Motion adds
+   `tabIndex="0"`. Fixed the same way: `whileTap={{ scale: reduceMotion
+   ? 1 : 0.98 }}` — the prop is always present, only its value becomes
+   a no-op.
+
+Both fixes verified via a dedicated re-run of the Playwright E2E
+script's reduced-motion step: zero console errors, confirmed twice
+(once showing the bug, once showing it fixed).
 
 ## What Does Not Exist Yet
 
-Grad-CAM explainability (Phase 12), image generation (Phase 13),
-advanced analytics, a mobile app, a social feed, chat, OAuth login,
-pgvector (the `VectorIndex` interface is ready for it, deliberately
-not introduced since nothing requires it yet), a formal retrieval
-benchmark (no reliable ground truth exists — see below), deleting an
-analysis (and therefore no caller of `embedding_service
-.remove_from_index` yet, though it's implemented and tested). See
-ROADMAP.md Phases 12–17.
+Image generation (Phase 13), advanced analytics, a mobile app, a
+social feed, chat, OAuth login, a formal Grad-CAM faithfulness
+*benchmark* (a small sanity check was performed and is documented
+above — a rigorous benchmark with a held-out evaluation protocol is a
+different, larger undertaking not attempted), pgvector, deleting an
+analysis. See ROADMAP.md Phases 13–17.
 
 ## Known Limitations / Honest Gaps
 
-- **No formal retrieval benchmark was performed** (Phase 11 spec §31)
-  — same-breed retrieval-rate@K would conflate breed classification
-  with visual similarity, which this phase's own spec explicitly
-  warns against treating as equivalent. The qualitative validation
-  above is real and honestly reported, but it is not a benchmark.
-- **Single global FAISS index, not per-user/public-vs-private
-  indexes** — a deliberate architecture choice (see ARCHITECTURE.md
-  §21): privacy is enforced as a mandatory, unconditional SQL filter
-  at the `SimilarityService` layer instead, the same pattern this
-  codebase already uses for every other ownership check. Documented
-  as the reason this is still safe despite one shared index.
-- **Single-process-instance limitation**, same as the in-memory rate
-  limiter (Phase 9) and this project's other process-wide singletons:
-  the FAISS index and embedding model are in-memory per process; a
-  multi-worker deployment would need either a shared index server or
-  per-worker index files kept in sync.
-- **Write-through index persistence** rewrites the whole index file on
-  every add/remove — cheap at this project's scale (a few MB), would
-  need batching at real production scale.
-- **`GET /similar`'s ~370ms average is dominated by sequential DB
-  round-trips**, not the sub-millisecond FAISS search — a real,
-  measured number, left as-is rather than prematurely optimized
-  (batching the candidate-resolution queries is the obvious next
-  step if this ever needs to be faster).
-- Previously noted limitations (rate limiting in-memory, local-disk
-  image storage, client-side-only route protection, the one
-  architecturally-unavoidable guest 401, no live Anthropic API call
-  tested, local dev Postgres on port 5433, the ML-less Docker image,
-  `vitest.config.ts`'s `pool: "threads"`) are unchanged from Phase 9/10.
+- **Grad-CAM explains the model's own prediction, not ground truth.**
+  A misprediction (documented above: `Bengal_105.jpg` → Egyptian Mau)
+  still gets a fully genuine, real heatmap — Grad-CAM explains *why
+  the model said what it said*, never whether the model is right.
+  This is stated explicitly in the UI's disclaimer text.
+- **The faithfulness check is a sanity check, not a benchmark** — 5
+  photos of one breed, one masking threshold (top 15%), one masking
+  strategy (mean-color fill). A rigorous study would vary breeds,
+  thresholds, and masking strategies, and compare against a random-
+  region-masking control. Not done; documented as not done.
+- **Write-through explanation storage** shares the same
+  cheap-at-this-scale, would-need-batching-at-real-scale tradeoff as
+  Phase 11's FAISS index and Phase 9's image storage.
+  `heatmap+overlay` rendering's one 301ms outlier (vs. a 7.9ms best
+  case) suggests OpenCV's first colormap call in a process pays some
+  warm-up cost — not investigated further, since steady-state
+  performance (the numbers that matter for a running server) is fine.
+- **Single-process-instance limitation**, same as every other
+  process-wide singleton in this codebase (breed classifier, embedding
+  model, FAISS index, in-memory rate limiter).
+- Previously noted limitations (no live Anthropic API call tested,
+  local dev Postgres on port 5433, the ML-less Docker image,
+  `vitest.config.ts`'s `pool: "threads"`, single global FAISS index
+  with SQL-enforced privacy) are unchanged from Phase 9–11.
 
 ## Next Steps
 
-Begin Phase 12: Grad-CAM Explainability (heatmap generation for the
-breed classifier, a "why did the AI predict this?" UI panel) — the
-next un-started item in ROADMAP.md.
+Begin Phase 13: Creative Generation (`ImageGenerationProvider`
+interface + fallback UI, wiring up the Cat Card's existing "Generate
+Wallpaper" placeholder button) — the next un-started item in
+ROADMAP.md.
 
 ## Notes for Future Sessions
 
-- **torch and faiss-cpu cannot both be imported in the same Windows
-  process without `KMP_DUPLICATE_LIB_OK=TRUE` set first** — set it as
-  early as possible (this project sets it in `app/__init__.py`) if any
-  future phase adds another OpenMP-linked library (e.g. a new
-  torch-based model) to a process that already imports faiss, or
-  vice versa.
-- **`faiss.IndexIDMap` ≠ `faiss.IndexIDMap2`** — only the latter
-  supports `reconstruct()`. If a future vector index needs "get this
-  exact vector back by id," reach for `IndexIDMap2` from the start.
-- **A generic ImageNet-pretrained backbone, not this project's own
-  fine-tuned classifier, is the right embedding source when the goal
-  is visual similarity, not classification** — a fine-tuned model's
-  features are pulled toward its training objective (breed
-  separation) at the expense of general visual structure. Worth
-  remembering as a category, not just a one-off choice, if a future
-  phase needs embeddings for a different purpose.
-- **Reusing an existing model's penultimate-layer features (not
-  training a new model) is a legitimate, standard way to get a strong
-  embedding baseline** — validated qualitatively with real photos
-  before committing to it as the shipped approach.
-- Previously noted lessons (Base UI quirks, dark-mode media-query
-  strategy, forced-tool-use for structured LLM output, the
-  `useSyncExternalStore` pattern for SSR-safe external state, DB-backed
-  sessions over JWT, ownership-scoped queries as the security boundary,
-  the `AuthCard` reduced-motion hydration fix, the idempotent-event-log
-  pattern for un-farmable rewards) all still apply.
+- **A from-scratch Grad-CAM (PyTorch hooks) is genuinely simple**
+  (roughly a dozen meaningful lines) **and more auditable/testable
+  than reaching for a wrapper library** — consistent with this
+  codebase's established preference (bcrypt over passlib, the XP/level
+  formula, the embedding pipeline) for owning algorithms it can fully
+  explain rather than depending on a black-box dependency for
+  something core to the product's story.
+- **Verify a model's exact tensor shapes empirically before choosing a
+  Grad-CAM target layer** — `features[-1]` was correct here, but that
+  was confirmed by actually running a forward pass and checking
+  `.shape`, not assumed from "that's usually where it goes."
+  Different architectures (a model with a different pooling strategy,
+  or extra layers after the last spatial feature map) could need a
+  different layer.
+- **Framer Motion adds `tabIndex="0"` automatically to any
+  `motion.div` carrying a `while*` gesture prop or pointer-event
+  handlers** — conditionally omitting *the whole prop* under
+  `prefers-reduced-motion` (rather than making its animated *value* a
+  no-op) is a reliable way to introduce a real SSR hydration mismatch.
+  This is now a 3-for-3 pattern in this codebase (`AuthCard`'s
+  `initial`, `useCardTilt`'s `style`/`handlers`, `CatCard`'s
+  `whileTap`) — worth checking for on sight in any future Framer
+  Motion code review, not just when Playwright's `reducedMotion:
+  "reduce"` context option happens to catch it again.
+- Previously noted lessons (DB-backed sessions over JWT,
+  ownership-scoped queries as the security boundary, the idempotent-
+  event-log pattern, content-hash deduplication, model versioning via
+  a cache-key unique constraint) all still apply — this phase's caching
+  design (`(analysis_id, target_class, breed_model_version)`) is the
+  same pattern as Phase 11's embedding dedup, applied to a new resource.

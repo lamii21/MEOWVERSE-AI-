@@ -977,3 +977,158 @@ during Phase 11 (see PROJECT_STATUS.md for the actual numbers):
 `build` correctly backfilled 869 previously-unembedded analyses,
 `verify` reported zero problems across 980 real embedding rows
 afterward.
+
+## 23. Explainable AI: Real Grad-CAM (Phase 12)
+
+**Target model**: `app/ml/breed_classifier.py`'s `BreedClassifier` —
+the same fine-tuned MobileNetV3-Small used for the actual breed
+*prediction* shown to the user. This is a deliberate difference from
+Phase 11's embedding model: Grad-CAM must explain *this specific
+prediction*, so it has to run against the exact model that produced
+it, not a generic feature extractor. `BreedClassifier.explain()` is a
+new method alongside the existing `predict()` — same loaded weights,
+same singleton, same `is_available` honesty contract, no second model
+to keep in sync.
+
+**Target layer, verified by inspection, not assumed**: a real forward
+pass of a 224×224 tensor through `model.features` (the full 13-block
+Sequential) produces a `(576, 7, 7)` tensor — confirmed empirically
+before writing any Grad-CAM code. `model.avgpool` then collapses that
+to `(576, 1, 1)`, destroying every spatial coordinate, and
+`model.classifier` (a plain `Linear → Hardswish → Dropout → Linear`
+stack) operates purely on the flattened 576-vector with no spatial
+structure left at all. That makes `model.features[-1]`
+(`GRAD_CAM_TARGET_LAYER = "features.12"`, a `Conv2dNormActivation`
+block) the *only* layer in this architecture that is both late enough
+to carry high-level, class-discriminative features and early enough to
+still have the spatial `(7, 7)` grid Grad-CAM needs to produce a
+heatmap at all.
+
+**The algorithm** (Selvaraju et al., 2017 — "Grad-CAM: Visual
+Explanations from Deep Networks via Gradient-based Localization"),
+implemented directly with PyTorch forward/backward hooks (not a
+wrapper library — `pytorch-grad-cam` is pre-staged in
+`requirements-ml.txt` from early planning but was deliberately not
+used, in favor of a from-scratch implementation whose every step is
+auditable and independently testable, matching this codebase's
+established preference for owning its core algorithms — see `bcrypt`
+over `passlib`, Phase 9):
+
+1. Forward pass through the full model, capturing `features[-1]`'s
+   output via a forward hook (real activations, `(576, 7, 7)`).
+2. Pick the target class logit — the caller's explicit `target_class`,
+   or (default) the breed already shown to the user for this analysis.
+3. Backward pass from *only* that one logit. A backward hook on
+   `features[-1]` captures the real gradients flowing back to it,
+   `(576, 7, 7)` — "how much would this one class's score change if
+   each activation here changed."
+4. Global-average-pool the gradients over the spatial dimensions →
+   one importance weight per of the 576 channels.
+5. Weight each channel's activation map by its coefficient and sum
+   across channels → a single `(7, 7)` importance map
+   (`torch.einsum("c,chw->hw", weights, activations)`).
+6. ReLU — keep only *positive* contributions to the target class.
+7. Min-max normalize to `[0, 1]` (an all-zero map in the degenerate
+   case where nothing contributed positively at all — never fabricated
+   as if something had).
+8. Bilinear-resize from `(7, 7)` up to the *original* photo's actual
+   pixel dimensions (`torch.nn.functional.interpolate`).
+
+Verified against real trained weights (`ml/models/breed_classifier.pt`,
+Phase 4's training run) with real Oxford-IIIT Pet photos before this
+was considered done — see PROJECT_STATUS.md for the actual numbers,
+including a real misprediction (Bengal → Egyptian Mau) reported
+honestly rather than hidden.
+
+**Faithfulness sanity check** (spec §27, optional, implemented since
+the pipeline made it practical): masking the top 15% of a photo's
+heatmap with the image's own mean color and re-running the classifier
+for the *same* target class showed a real mean confidence drop of
++0.558 across 5 real British Shorthair photos — 4 dropped
+substantially (two even flipped the model's top-1 prediction to a
+different breed entirely), one barely moved. This is reported as
+exactly what it is: a sanity check that the heatmap correlates with
+what the model actually relies on, never as proof that the highlighted
+region *causes* the prediction (masking also changes surrounding
+context/composition, and a CNN's response to a modified image isn't
+strictly decomposable into "what changed").
+
+**Confidence vs. Grad-CAM intensity — never conflated**: `confidence`
+is a single scalar, the model's own softmax probability for the target
+class (identical concept to `AnalysisResult.breed.confidence`). The
+heatmap is a full `(H, W)` array with no single "score." The API
+(`CatExplanation`), the DB row (`CatExplanationModel`), and the UI
+(`GradCamExplanation.tsx`) all keep these as two visually and
+structurally separate things — the UI shows "Prediction confidence:
+91%" as plain text, never a claimed property of the colorized image
+next to it.
+
+**Visualization**: `app/ml/heatmap_visualization.py` colorizes the
+normalized heatmap with OpenCV's `COLORMAP_JET` (the same scale the
+original Grad-CAM paper's own figures use — not an invented one:
+blue = low importance, red = high). The overlay blends it onto the
+original photo with **per-pixel alpha proportional to that pixel's
+importance** (`alpha = heatmap_value × 0.6`), not one flat alpha —
+low-importance regions stay close to the original photo, and even the
+single hottest pixel is capped at 60% blend, so the source photo is
+never fully hidden (spec §10).
+
+## 24. Explanation Storage, Privacy & Caching (Phase 12)
+
+**Storage**: reuses `ImageStorageProvider` (Phase 9) — no second
+storage system. Phase 12 adds exactly one new capability to the
+interface, `load(url) -> bytes | None`, the inverse of `save()`,
+needed because Grad-CAM has to re-read the *original* uploaded photo
+back out of storage to run inference on it (the analyze pipeline never
+kept the raw bytes around after the initial request).
+`LocalImageStorageProvider.load()` reverses a `/media/<file>` URL back
+to a filesystem path, with an explicit path-traversal guard
+(`resolved.is_relative_to(directory)`) before ever reading — the URL
+technically originates from a DB column, but nothing in this pipeline
+should ever trust a stored string enough to skip that check. The
+generated heatmap/overlay PNGs are saved through the exact same
+`storage.save()` every uploaded photo goes through; the API only ever
+returns the resulting `/media/...` URLs, never a filesystem path.
+
+**Privacy**: identical rule to every other analysis-scoped endpoint —
+the source analysis must be visible to the caller (public, or owned by
+an authenticated caller) *before* anything else happens, checked via
+the same `get_public_analysis`/`get_owned_analysis` ownership-scoped
+queries Phase 9 established. A 404 for "doesn't exist" and "exists but
+isn't yours" are identical, same anti-enumeration principle as
+everywhere else. This check happens first, ahead of even checking
+whether the analysis is in demo mode — a private demo-mode analysis
+gets the same 404 as a private trained one; only a caller who's
+already allowed to see the cat at all learns *why* no heatmap exists
+for it.
+
+**Never a fake explanation for a demo prediction**: `breed_mode` is
+checked on the *stored analysis row*, not re-derived from whether the
+classifier happens to be loaded right now — an analysis created while
+the classifier was unavailable (`breed_mode: "demo"`) stays honestly
+unexplainable forever, even if the classifier becomes available again
+later, because that analysis's displayed breed was never a real
+prediction to begin with.
+
+**Caching** (spec §13): `CatExplanationModel` is unique on
+`(analysis_id, target_class, breed_model_version)`. A second request
+for the same analysis + same target class + same classifier version
+reuses the row (`cached: true` in the response) instead of running
+Grad-CAM again — a real forward+backward pass is too expensive to
+repeat on every page view. A different `target_class` gets its own
+row (a genuinely different artifact). A retrained classifier (bumped
+`BreedClassifier.version`) simply won't match any existing row, so a
+fresh, correctly-versioned explanation gets generated automatically —
+no explicit "invalidate the old ones" step needed, the cache key
+itself makes staleness self-resolving, same pattern as Phase 11's
+embedding-model versioning.
+
+**On-demand only** (spec §31): nothing about Grad-CAM runs during
+`POST /api/v1/analyses` — `analyze_image()` is unchanged by this
+phase. Generation happens exclusively inside
+`POST /api/v1/analyses/{id}/explanation`, triggered only when a user
+clicks "Why this breed?" in the frontend (`GradCamExplanation.tsx`
+uses a manually-triggered `useMutation`, deliberately not an
+auto-fetching `useQuery` the way Phase 11's "Cats Like This" is) —
+keeping every analyze request's latency unaffected by a feature most
+views of a given cat will never invoke.
