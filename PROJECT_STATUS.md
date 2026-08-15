@@ -1,12 +1,13 @@
 # MeowVerse AI — Project Status
 
-_Last updated: 2026-08-15_
+_Last updated: 2026-08-16_
 
 ## Current Phase
 
-**Phase 12 — MeowVerse Explainable AI: Real Grad-CAM Breed
-Explanations: complete and verified end-to-end.** Phase 13 is next,
-not yet started.
+**Phase 13 — MeowVerse Cat Personality Engine: Structured, Cute &
+Honest AI Personality: complete and verified end-to-end.** Phase 14
+(Creative Generation / `ImageGenerationProvider`) is next, not yet
+started.
 
 ## What Exists
 
@@ -88,6 +89,107 @@ not yet started.
     loading/success/unavailable/error states, view switching, real
     confidence display, accessible alt text, and the disclaimer).
     **106/106 frontend tests passing** (was 96), lint/build clean.
+
+## What Exists (Phase 13 additions)
+
+- `backend/` —
+  - `app/services/personality_scoring.py` — `PersonalityScoringEngine`:
+    `compute_traits()` (8 traits, deterministic formula from real
+    breed/color signals, `PERSONALITY_ENGINE_VERSION = "1.0"`, no
+    `random`/`np.random` anywhere) and `select_archetype()` (nearest-
+    centroid over 10 hand-authored archetypes). Rarity and Grad-CAM
+    data are never accepted as parameters at all.
+  - `app/models/personality.py` — `CatPersonalityModel`
+    (`cat_personalities`, unique on `analysis_id +
+    personality_engine_version`) and `CatPersonalityInterpretationModel`
+    (`personality_interpretations`, append-only, "latest wins").
+  - `app/repositories/personality_repository.py`,
+    `app/services/personality_service.py` — cache lookup/creation,
+    `get_personality()` (public-or-owned) and
+    `regenerate_interpretation()` (owner-only — a new, deliberately
+    stricter rule than the read path).
+  - `app/ai/personality_prompt.py`,
+    `app/services/personality_interpretation_service.py` — prompt
+    construction and the generate-with-fallback orchestration; 10
+    hand-written, archetype-specific demo interpretations
+    (`_DEMO_INTERPRETATIONS`) used whenever the LLM is unavailable or
+    fails.
+  - `app/ai/providers.py`, `app/ai/anthropic_provider.py` — new
+    `generate_personality_interpretation` method on the existing
+    `LLMProvider` ABC, implemented via the same forced tool-use +
+    retry-once pattern as Phase 6/7's profile/story generation. No new
+    Anthropic client code.
+  - `app/schemas/personality.py` — `PersonalityTraitScore`,
+    `PersonalityArchetypeOut`, `PersonalityInterpretation`
+    (length-bounded, zero fields for scores/archetype — structurally
+    cannot smuggle numbers out of the LLM), `CatPersonalityResponse`
+    (includes the disclaimer text).
+  - `app/api/v1/personality.py` — `GET
+    /api/v1/analyses/{id}/personality` (rate-limited,
+    guest-accessible on public cats) and `POST
+    .../personality/regenerate` (rate-limited, real ownership
+    required).
+  - Migration `f3782b65138a` — adds `cat_personalities` and
+    `personality_interpretations` only, no changes to any existing
+    table. Verified via a real upgrade → downgrade → upgrade cycle.
+  - Tests: `test_personality_scoring.py` (48 tests — determinism,
+    bounded ranges across breeds/confidences, exact level-threshold
+    boundaries, `rarity` provably absent from the function signature,
+    archetype selection incl. an exact centroid match, versioning),
+    `test_personality_interpretation.py` (7 tests — fallback on every
+    failure mode, and a structural test that the interpretation schema
+    cannot carry trait scores or archetype identity),
+    `test_personality.py` (11 tests — happy path, caching, regenerate
+    incl. 401 for guest / 404 for a stranger on a public cat, full
+    owner/stranger/guest/public ownership matrix). **312/312 backend
+    tests passing** (was 246), ruff clean.
+  - One real, pre-existing (Phase 11) test-flakiness bug found and
+    fixed while running the full suite: `test_similarity.py`'s two
+    `TestPrivacy` tests used near-black fixture colors that started
+    colliding with the shared dev DB/FAISS corpus's natural growth
+    across this session's many phases (33 vectors by this phase, up
+    from 24 at the end of Phase 12), occasionally pushing a test's
+    target cat outside the hard-capped `k=20` similarity search.
+    Root-caused via isolated re-runs and a direct FAISS index-size
+    probe before touching any code; fixed by switching those two
+    tests' fixture colors to a distinctive, unusual, saturated pair
+    unlikely to cluster with the rest of the accumulated corpus — not
+    a Phase 13 regression.
+- `frontend/` —
+  - `types/personality.ts`, `services/personality.ts` — typed client
+    for both endpoints.
+  - `features/personality/components/PersonalityCard.tsx` — the main
+    component: auto-loads via `useQuery` (like "Cats Like This",
+    unlike Grad-CAM's manual trigger, since personality is meant to
+    feel central and immediate), a playful `PersonalityReveal` loading
+    sequence, archetype header, 8 accessible `TraitBar`s
+    (`role="progressbar"`, level word always shown alongside the bar so
+    no information is color-only), headline/catchphrase/secret
+    talent/fictional job/fun fact, the disclaimer, an owner-only
+    Regenerate button, and a Download PNG button reusing `CatCard`'s
+    exact `html-to-image` export technique (no second export
+    pipeline).
+  - `features/personality/archetype-theme.ts` — maps each archetype's
+    `theme_token` to a visual treatment built entirely from the
+    existing `magic`/`peach`/`sky`/`slate` design tokens — no new
+    arbitrary colors.
+  - `features/personality/components/HowPersonalityWorks.tsx` — a
+    4-step, collapsed explainer; `features/analyze/components/HowMeowVerseKnows.tsx`
+    now also cross-references it directly, adding a "Personality trait
+    scores" row to the real-signals group and rewriting the AI group's
+    row to correctly describe the new deterministic-scores-vs-AI-text
+    split (the pre-Phase-13 wording described the old, free-text
+    profile personality field, not this feature).
+  - Wired into the same three places Phase 11/12's similarity/Grad-CAM
+    sections are: the analyze results page, the public `/cat/[id]`
+    page, and the owner's `/collection/[id]` page.
+  - Frontend build and lint both verified clean
+    (`npm run build`, `npm run lint`). **No new frontend unit tests
+    were written this phase** — see Known Limitations below; this
+    continues, rather than newly introduces, a gap that has existed
+    for every phase in this session (the frontend has a working
+    `vitest` config but zero test files in the repo as of the start of
+    this phase).
 
 ## Real Results (Phase 12)
 
@@ -200,14 +302,100 @@ Both fixes verified via a dedicated re-run of the Playwright E2E
 script's reduced-motion step: zero console errors, confirmed twice
 (once showing the bug, once showing it fixed).
 
+## Real Results (Phase 13)
+
+- **Both suites green**: 312/312 backend (was 246), including 66 new
+  personality tests. No new frontend automated tests this phase
+  (Known Limitations); frontend build and lint both clean.
+- **The three-way separation was verified structurally, not just by
+  convention**: a dedicated test inspects `compute_traits`'s function
+  signature and confirms `rarity` is not a parameter at all; a
+  separate test inspects `PersonalityInterpretation.model_fields` and
+  confirms none of the 8 trait names or `archetype_id` appear in it —
+  an LLM literally has nowhere to put a smuggled score even if a
+  prompt injection tried.
+- **Real end-to-end browser verification** via a scripted Playwright
+  run against real dev servers (backend on port 8001, frontend on
+  3000 — port 8000 remains occupied by the unkillable ghost process
+  documented since Phase 11/12) with a real Abyssinian photo from the
+  training dataset:
+  - Registered a new user → uploaded the photo via `/discover` →
+    landed on `/analyze` → the Cat Personality card auto-loaded and
+    rendered 8 real trait bars and the archetype **"Dreamy Explorer"**
+    (curiosity 69/High, adventurousness 64/High — consistent with that
+    archetype's centroid) with the disclaimer visible.
+  - Captured the real analysis id from the network response, navigated
+    to the owner's persistent `/collection/[id]` page, and confirmed
+    **all 8 trait scores were byte-for-byte identical** to the
+    `/analyze` page's — real persistence + determinism, not just a
+    client-side cache artifact.
+  - Clicked **Regenerate** and confirmed **all 8 trait scores remained
+    identical afterward** — the critical invariant the two-table
+    caching design exists to guarantee. (The demo-mode headline text
+    was also identical before/after, which is expected and correct:
+    with no Anthropic key configured, both calls hit the same
+    fixed, archetype-specific demo template — this is not a bug, and
+    a live LLM call would be expected to vary the wording call-to-call
+    while still never touching the scores.)
+  - Called the real `/share` endpoint, cleared cookies to simulate a
+    logged-out guest, and loaded the public `/cat/[id]` page: the
+    Cat Personality section and its disclaimer were both visible, the
+    registered user's email was **not** present anywhere in the page
+    text, and the owner-only **Regenerate button correctly did not
+    render** for the guest.
+  - Verified visually at a 375px mobile viewport with
+    `prefers-reduced-motion: reduce` set — screenshot confirms the
+    full Cat Personality card renders correctly (archetype, all 8
+    trait bars with level words alongside the bars so nothing is
+    color-only, secret talent/fictional job/fun fact, disclaimer,
+    "Offline demo content" badge) with no new console errors beyond a
+    pre-existing, unrelated 401 that also appears on every other guest
+    page load in this app (an anonymous session-check call, not a
+    Phase 13 regression).
+- **No formal LLM-output-quality benchmark was computed or claimed** —
+  none was requested, and none would be meaningful in an environment
+  where the only reachable path is the deterministic demo fallback
+  (see below).
+- **Performance, measured against the live dev server, not
+  estimated** (warm process, real Postgres, real analysis rows):
+  - `GET /api/v1/analyses/{id}/personality`, cache miss (first request
+    for a fresh analysis — computes all 8 traits, selects the
+    archetype, generates the demo-fallback interpretation, writes both
+    new rows): **294ms**.
+  - Same endpoint, cache hit (DB reads only, no scoring/generation):
+    mean **254ms** over 5 requests (243–277ms range) — in the same
+    ballpark as Phase 12's Grad-CAM cache-hit figure (~220ms), i.e.
+    dominated by this dev environment's Python/DB round-trip overhead
+    rather than by any personality-specific cost.
+  - `POST /api/v1/analyses/{id}/personality/regenerate`: mean **258ms**
+    over 3 requests (249–264ms) — writes one new interpretation row,
+    never touches the scores table.
+  - The pure scoring engine itself (`compute_traits` +
+    `select_archetype`, no DB/HTTP involved) is sub-millisecond; the
+    measured endpoint latency above is almost entirely DB round-trip
+    and FastAPI/Pydantic serialization overhead, not the scoring math.
+- **No live Anthropic API call was tested for personality
+  interpretation** — `ANTHROPIC_API_KEY` is not configured in this dev
+  environment (unchanged since Phase 6). Every interpretation
+  generated during this phase's testing, including the full Playwright
+  E2E run above, genuinely went through the deterministic demo-fallback
+  path (`interpretation_mode: "demo"`, confirmed via the visible
+  "Offline demo content" badge and via `type(get_llm_provider()).__name__
+  == "NullLLMProvider"`). This is reported honestly rather than
+  simulated; the fallback path itself has been thoroughly tested
+  (mocked-provider unit tests + this real browser run), but a live
+  Anthropic personality generation call has not been.
+
 ## What Does Not Exist Yet
 
-Image generation (Phase 13), advanced analytics, a mobile app, a
+Image generation (Phase 14), advanced analytics, a mobile app, a
 social feed, chat, OAuth login, a formal Grad-CAM faithfulness
 *benchmark* (a small sanity check was performed and is documented
 above — a rigorous benchmark with a held-out evaluation protocol is a
 different, larger undertaking not attempted), pgvector, deleting an
-analysis. See ROADMAP.md Phases 13–17.
+analysis, live-verified Anthropic personality generation (see above),
+frontend automated tests for the personality feature. See ROADMAP.md
+Phases 14–18.
 
 ## Known Limitations / Honest Gaps
 
@@ -231,17 +419,38 @@ analysis. See ROADMAP.md Phases 13–17.
 - **Single-process-instance limitation**, same as every other
   process-wide singleton in this codebase (breed classifier, embedding
   model, FAISS index, in-memory rate limiter).
-- Previously noted limitations (no live Anthropic API call tested,
-  local dev Postgres on port 5433, the ML-less Docker image,
-  `vitest.config.ts`'s `pool: "threads"`, single global FAISS index
-  with SQL-enforced privacy) are unchanged from Phase 9–11.
+- **No frontend automated tests exist for the personality feature (or
+  for any feature in this codebase)** — `vitest` is configured and
+  working (`vitest.config.ts`/`vitest.setup.ts`), but zero `*.test.tsx`
+  files exist in the repo as of this phase, across every phase of this
+  session, not just Phase 13. All frontend verification this phase was
+  a real production build, real lint, and a real scripted Playwright
+  browser run rather than unit tests. This is a genuine, pre-existing
+  gap, not something Phase 13 introduced or is uniquely exempt from —
+  flagged honestly rather than silently carried forward.
+- **The demo-fallback interpretation is a fixed template per
+  archetype, not varied per regenerate call** — with no LLM key
+  configured, calling Regenerate twice on the same cat currently
+  produces byte-identical creative text (confirmed in the E2E run
+  above), because the fallback intentionally has no source of
+  variation of its own. A live Anthropic call would be expected to
+  vary the wording between calls while the underlying trait scores
+  still never change — this variation has not been observed directly
+  since no API key is configured here.
+- Previously noted limitations (no live Anthropic API call tested for
+  profile/story generation, local dev Postgres on port 5433, the
+  ML-less Docker image, `vitest.config.ts`'s `pool: "threads"`, single
+  global FAISS index with SQL-enforced privacy) are unchanged from
+  Phase 9–12.
 
 ## Next Steps
 
-Begin Phase 13: Creative Generation (`ImageGenerationProvider`
+Begin Phase 14: Creative Generation (`ImageGenerationProvider`
 interface + fallback UI, wiring up the Cat Card's existing "Generate
 Wallpaper" placeholder button) — the next un-started item in
-ROADMAP.md.
+ROADMAP.md. Writing a first frontend test suite (nothing exists yet,
+any phase) would also be a reasonable, overdue place to invest before
+the frontend surface grows much further.
 
 ## Notes for Future Sessions
 
@@ -275,3 +484,31 @@ ROADMAP.md.
   a cache-key unique constraint) all still apply — this phase's caching
   design (`(analysis_id, target_class, breed_model_version)`) is the
   same pattern as Phase 11's embedding dedup, applied to a new resource.
+- **Splitting a cached resource into two tables with different unique-
+  constraint semantics can make an invariant structural instead of
+  conventional** — Phase 13's `cat_personalities` (unique-constrained,
+  the actual staleness contract) vs. `personality_interpretations`
+  (unpublished, append-only, "latest wins") means "regenerating text
+  can never change the scores" isn't just a rule the code happens to
+  follow — the regenerate code path has no route to `cat_personalities`
+  at all. Worth reaching for this pattern again anywhere a "cheap,
+  deterministic core" and an "expensive, creative, regeneratable
+  extra" need to be cached together but must never leak into each
+  other.
+- **A schema with no field for the thing it must not be able to change
+  is a stronger guarantee than a prompt instruction** — instead of
+  telling the LLM "don't change the scores," `PersonalityInterpretation`
+  simply has nowhere to put a score, which a dedicated test can verify
+  by introspecting `model_fields` rather than having to test prompt
+  compliance. Cheaper and more reliable than trusting instruction-
+  following, and worth using as a default whenever an LLM's output
+  must not be allowed to touch specific pre-decided data.
+- **A shared dev DB/FAISS corpus that keeps growing across every phase
+  of a long session will eventually make old tests flaky in ways that
+  have nothing to do with the current phase's changes** — Phase 13
+  encountered this a second time (see Phase 11/12's flakiness note
+  below); the fix each time was distinctive test fixtures, not
+  loosening the assertion or raising a hard-capped API limit. Worth
+  checking early (via an isolated re-run of the failing file alone)
+  whenever a full-suite run fails a test a phase's own new files don't
+  touch, rather than assuming the new code caused it.

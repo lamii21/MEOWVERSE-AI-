@@ -3,6 +3,7 @@ from app.models.analysis import CatAnalysisModel
 from app.models.collection_event import CollectionEventModel
 from app.models.embedding import CatEmbeddingModel
 from app.models.explanation import CatExplanationModel
+from app.models.personality import CatPersonalityInterpretationModel, CatPersonalityModel
 from app.models.progress import UserProgressModel
 from app.models.session import SessionModel
 from app.models.story import StoryModel
@@ -12,6 +13,8 @@ __all__ = [
     "CatAnalysisModel",
     "CatEmbeddingModel",
     "CatExplanationModel",
+    "CatPersonalityInterpretationModel",
+    "CatPersonalityModel",
     "CollectionEventModel",
     "SessionModel",
     "StoryModel",

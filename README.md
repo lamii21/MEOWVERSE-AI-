@@ -16,7 +16,7 @@ This README is intentionally minimal during early development. See:
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) — what's done, what's next
 
 A full README (features, screenshots, API reference, deployment guide)
-is written in Phase 16 once the product is functional end to end.
+is written in Phase 17 once the product is functional end to end.
 
 ## Quick start (local development)
 
@@ -140,7 +140,7 @@ account's collection, **Favorite** and **Share** work the same way
 device's native share sheet where available), **Download PNG** exports
 the actual card as an image file, and **Story** jumps to story
 generation. **Generate Wallpaper** is an honest placeholder — disabled
-with a "coming soon" label — pending Phase 13's image generation.
+with a "coming soon" label — pending Phase 14's image generation.
 
 ## Accounts & your cat collection
 
@@ -267,3 +267,40 @@ ARCHITECTURE.md §23–24 for the exact algorithm, target layer, and
 privacy/caching design, and PROJECT_STATUS.md for real measured
 performance and a from-real-photos qualitative review (successes and
 failures both included).
+
+## Cat Personality — an AI-inspired personality, honestly labeled
+
+MeowVerse builds a **playful, AI-inspired personality** for every
+analyzed cat — but a cat's true personality genuinely cannot be
+determined from a photo, and MeowVerse never claims otherwise. The
+feature is deliberately split into two halves that are never allowed
+to blur together:
+
+1. **8 trait scores** (curiosity, playfulness, calmness, cuddliness,
+   confidence, mischief, elegance, adventurousness), each 0-100, computed
+   by a **deterministic, documented rules engine** from the same real
+   breed and fur-color signals already produced by the classifier and
+   color analyzer — no LLM invents these numbers, no random numbers are
+   involved, and the same photo always produces the same scores.
+   Rarity and Grad-CAM data are both deliberately excluded from
+   scoring, so neither collectible tier nor "where the model looked"
+   is ever treated as behavioral evidence.
+2. A **cute archetype** (like "🌙 Dreamy Explorer" or "🎀 Cozy
+   Cuddlebug"), chosen deterministically from those 8 scores, and a
+   short piece of **creative interpretation** — a headline, catchphrase,
+   secret talent, fictional job, and fun fact — optionally written by
+   the same LLM provider used for Phase 6/7's profile and story
+   generation. The LLM can only ever produce this creative flavor text;
+   it structurally cannot see or alter the trait scores or archetype.
+   If no API key is configured or the call fails, a hand-written,
+   archetype-specific fallback is used instead and clearly labeled
+   "Offline demo content."
+
+Every score is shown as **"AI-inspired curiosity: 69"**, never as "your
+cat is 69% curious," and every Cat Personality card carries an explicit
+disclaimer: *"Personality is an AI-inspired interpretation of visual
+signals, not a scientific assessment of your cat's behavior."*
+Regenerating the creative text (owner-only) can never change the
+underlying trait scores or archetype — verified by both the caching
+design and a dedicated test. See ARCHITECTURE.md §25–28 for the scoring
+formula, archetype list, and LLM/fallback design.

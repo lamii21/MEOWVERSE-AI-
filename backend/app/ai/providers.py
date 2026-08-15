@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from app.schemas.personality import PersonalityInterpretation
 from app.schemas.profile import CatProfile, CatSignals
 from app.schemas.story import CatStory, StoryStyle
 
@@ -37,6 +38,26 @@ class LLMProvider(ABC):
 
         Raises LLMProviderError on any failure, same contract as
         generate_profile above.
+        """
+
+    @abstractmethod
+    async def generate_personality_interpretation(
+        self,
+        signals: CatSignals,
+        *,
+        archetype_name: str,
+        archetype_short_description: str,
+        trait_levels: dict[str, str],
+        rarity: str,
+    ) -> PersonalityInterpretation:
+        """Turns an ALREADY-DECIDED archetype + trait levels (from the
+        deterministic `PersonalityScoringEngine`, Phase 13) into
+        creative flavor text. Must never be asked to choose the
+        archetype or trait scores themselves — those are structurally
+        absent from `PersonalityInterpretation`.
+
+        Raises LLMProviderError on any failure, same contract as
+        generate_profile/generate_story above.
         """
 
     @property
@@ -79,6 +100,17 @@ class NullLLMProvider(LLMProvider):
     async def generate_story(
         self, signals: CatSignals, profile: CatProfile, style: StoryStyle
     ) -> CatStory:
+        raise LLMProviderError("No LLM provider configured; check is_available first")
+
+    async def generate_personality_interpretation(
+        self,
+        signals: CatSignals,
+        *,
+        archetype_name: str,
+        archetype_short_description: str,
+        trait_levels: dict[str, str],
+        rarity: str,
+    ) -> PersonalityInterpretation:
         raise LLMProviderError("No LLM provider configured; check is_available first")
 
 

@@ -290,7 +290,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   tests (9 profile + 4 story) covering the Anthropic provider, but the
   first live call should still be watched.
 - ⬜ Not done this phase (explicitly out of scope per the phase brief):
-  image generation (Phase 13).
+  image generation (Phase 14).
 
 ## Phase 8 — Magical Experience & Cat Card ✅
 - ✅ Cinematic reveal (`ResultReveal`): timed intro ("A new cat has
@@ -658,7 +658,75 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   moved — reported honestly, not smoothed over). Explicitly documented
   as a sanity check, not proof of causality. See PROJECT_STATUS.md.
 
-## Phase 13 — Creative Generation
+## Phase 13 — MeowVerse Cat Personality Engine: Structured, Cute & Honest AI Personality ✅
+- ✅ `PersonalityScoringEngine` (`backend/app/services/personality_scoring.py`) —
+  8 traits (curiosity, playfulness, calmness, cuddliness, confidence,
+  mischief, elegance, adventurousness), each scored 0-100 by a
+  documented, deterministic formula (`score = clamp(round(50 +
+  confidence_scale * (breed_offset + color_offset + entropy_offset)),
+  0, 100)`) from the real breed + color signals already produced by
+  Phases 4/5 — no arbitrary weights, no LLM-invented numbers, no
+  `random`/`np.random` anywhere in the module. Rarity and Grad-CAM data
+  are both deliberately excluded from scoring entirely (verified by a
+  test that inspects the function signature), so neither collectible
+  tier nor "where the model looked" can ever be treated as behavioral
+  evidence. See ARCHITECTURE.md §26.
+- ✅ 10 controlled archetypes (Dreamy Explorer, Cozy Cuddlebug, Magical
+  Mischief Maker, Tiny Royal, Gentle Soul, Chaos Bean, Mystic Whisker,
+  Calm Wanderer, Confident Adventurer, Velvet Charmer), each a
+  hand-authored trait centroid; selection is deterministic
+  nearest-centroid (Euclidean distance over the 8 trait scores) — same
+  analysis always produces the same archetype, never LLM-chosen, never
+  random.
+- ✅ Strict three-way separation enforced structurally, not just by
+  convention: `PersonalityInterpretation` (the only thing an LLM can
+  produce) has zero fields for trait scores or archetype identity, so
+  creative generation cannot smuggle in a number even if it tried —
+  verified by a dedicated schema-introspection test.
+- ✅ LLM interpretation reuses the existing `LLMProvider` architecture
+  exactly as Phase 6/7 established (forced tool-use, retry-once on
+  invalid schema) — no new Anthropic client. On any failure (no key,
+  timeout, invalid schema, rate limit), falls back to one of 10
+  hand-written, archetype-specific demo interpretations — never blocks
+  the endpoint, never fabricates that the LLM produced something it
+  didn't (`interpretation_mode: "demo"`).
+- ✅ `GET /api/v1/analyses/{id}/personality` (public-or-owned, matching
+  every other Phase 9-12 analysis-scoped endpoint) and
+  `POST .../personality/regenerate` (owner-only — a new, deliberately
+  stricter rule than the read path, since a mutating/LLM-cost-bearing
+  action must not be triggerable by a stranger merely viewing a public
+  cat). Two-table caching (`cat_personalities` unique on
+  `analysis_id + personality_engine_version`; `personality_interpretations`
+  append-only "latest wins") guarantees regenerating creative text can
+  never change the structured scores — by construction, not convention.
+- ✅ Cat Card upgraded with a collectible `PersonalityCard` (archetype
+  header, 8 accessible trait bars, headline/catchphrase/secret
+  talent/fictional job/fun fact, an explicit non-scientific disclaimer),
+  a playful loading reveal sequence, and a "How Personality Works"
+  explainer — reusing only existing design tokens, the existing PNG
+  export mechanism, and the existing "How MeowVerse Knows" transparency
+  accordion (now cross-referencing the new deterministic-scores-vs-AI-text
+  split). Mounted on the analyze results page, the public `/cat/[id]`
+  page, and the owner's `/collection/[id]` page.
+- ✅ Backend: 312/312 tests (was 246) — including 48 scoring-determinism/
+  boundary/archetype tests, 7 LLM-fallback/structural-separation tests,
+  and 11 API/ownership/caching tests, ruff clean. Frontend: build +
+  lint clean.
+- ✅ Playwright E2E against real dev servers with a real Abyssinian
+  photo: register → analyze → Cat Personality card renders (archetype
+  "Dreamy Explorer", 8 deterministic trait scores) → reload via
+  `/collection/[id]` → identical scores confirmed → Regenerate →
+  scores confirmed unchanged (the critical invariant) → shared →
+  public `/cat/[id]` verified to show personality + disclaimer with no
+  private data (email) leaked and no Regenerate button for a guest →
+  mobile (375px) + `prefers-reduced-motion` verified visually, zero new
+  console errors.
+- ⚠️ No `ANTHROPIC_API_KEY` is configured in this dev environment (same
+  as every prior phase), so all interpretation testing here genuinely
+  exercised the deterministic demo-fallback path, not a live LLM call
+  — reported honestly rather than simulated. See PROJECT_STATUS.md.
+
+## Phase 14 — Creative Generation
 - ⬜ `ImageGenerationProvider` interface + fallback UI
 - ✅ Cat Card (image, name, breed, rarity, magic power, colors; download
      PNG, share, copy link) — built early, in Phase 8, as the "MAGICAL
@@ -668,19 +736,19 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - ⬜ Wallpaper / avatar / sticker generation (the Cat Card already has a
      "Generate Wallpaper" placeholder button wired up and ready for this)
 
-## Phase 14 — Testing
+## Phase 15 — Testing
 - ⬜ Backend: Pytest unit + integration + pipeline + API tests
 - ⬜ Frontend: component tests
 - ⬜ E2E: Playwright
 
-## Phase 15 — Docker & CI/CD
+## Phase 16 — Docker & CI/CD
 - ⬜ Dockerfiles (frontend, backend), full Compose stack
 - ⬜ GitHub Actions: lint, test, build gates
 
-## Phase 16 — Documentation
+## Phase 17 — Documentation
 - ⬜ Full README (features, architecture, setup, API, roadmap, etc.)
 
-## Phase 17 — Final Polish
+## Phase 18 — Final Polish
 - ⬜ Accessibility pass, responsive pass, performance pass, security pass
 
 ---
@@ -694,8 +762,9 @@ as of Phase 9: "save + revisit history" was the one outstanding piece
 (Phase 8's "Save" only bookmarked locally, with no page to browse
 those bookmarks) and Phase 9 delivered the real, authenticated version
 — an account, a persistent per-user collection, and real history.
-Similarity search, Grad-CAM, and (most) creative generation remain
-explicitly post-MVP (Phases 11–13); collection/achievements got their
+Similarity search, Grad-CAM, the personality engine, and (most)
+creative generation remain explicitly post-MVP (Phases 11–14);
+collection/achievements got their
 first pass alongside Phase 9 (since the spec bundled a basic persistent
 collection into the same ask) and their full "Cat Universe" treatment
 — gamification, XP/levels, breed discovery, the constellation map —
@@ -712,9 +781,14 @@ in Phase 10.
   couldn't catch (e.g. actual model output failing schema validation in
   a way the tests didn't anticipate — the retry-then-demo-fallback path
   exists exactly for this).
-- Image generation (Phase 13) still depends on a provider abstraction
+- Image generation (Phase 14) still depends on a provider abstraction
   with only a working `NullProvider` fallback — `ImageGenerationProvider`
   is still a null stub.
+- No `ANTHROPIC_API_KEY` is configured on this dev machine (unchanged
+  since Phase 6) — Phase 13's personality interpretation has been
+  fully verified against the deterministic demo-fallback path (mocked
+  tests + a real browser E2E run), but not against a live Anthropic
+  call for personality specifically.
 - Docker Desktop on Windows works for local dev but needs to be running
   before `docker compose up`; confirmed working in Phase 1. The backend
   Docker image still doesn't include `requirements-ml.txt` (Phase 4/5

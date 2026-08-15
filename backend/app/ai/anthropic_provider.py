@@ -4,8 +4,10 @@ from typing import TypeVar
 import anthropic
 from pydantic import BaseModel, ValidationError
 
+from app.ai import personality_prompt
 from app.ai.providers import LLMProvider, LLMProviderError
 from app.ai.story_prompt import build_system_prompt, build_user_prompt
+from app.schemas.personality import PersonalityInterpretation
 from app.schemas.profile import CatProfile, CatSignals
 from app.schemas.story import CatStory, StoryStyle
 
@@ -13,8 +15,10 @@ logger = logging.getLogger(__name__)
 
 PROFILE_TOOL_NAME = "generate_cat_profile"
 STORY_TOOL_NAME = "generate_cat_story"
+PERSONALITY_TOOL_NAME = "generate_personality_interpretation"
 MAX_PROMPT_CHARS = 2000
 MAX_STORY_PROMPT_CHARS = 3000
+MAX_PERSONALITY_PROMPT_CHARS = 2000
 MAX_ATTEMPTS = 2  # 1 initial call + 1 semantic retry on invalid schema
 
 _PROFILE_SYSTEM_PROMPT = """\
@@ -71,6 +75,18 @@ def _build_story_tool_schema() -> dict:
             "exactly once with every field filled in."
         ),
         "input_schema": _strip_titles(CatStory.model_json_schema()),
+    }
+
+
+def _build_personality_tool_schema() -> dict:
+    return {
+        "name": PERSONALITY_TOOL_NAME,
+        "description": (
+            "Record the creative interpretation of an already-computed "
+            "personality archetype and trait levels. Call this exactly "
+            "once with every field filled in."
+        ),
+        "input_schema": _strip_titles(PersonalityInterpretation.model_json_schema()),
     }
 
 
@@ -215,4 +231,35 @@ class AnthropicLLMProvider(LLMProvider):
             user_prompt=user_prompt,
             tool=_build_story_tool_schema(),
             response_model=CatStory,
+        )
+
+    async def generate_personality_interpretation(
+        self,
+        signals: CatSignals,
+        *,
+        archetype_name: str,
+        archetype_short_description: str,
+        trait_levels: dict[str, str],
+        rarity: str,
+    ) -> PersonalityInterpretation:
+        user_prompt = personality_prompt.build_user_prompt(
+            signals=signals,
+            archetype_name=archetype_name,
+            archetype_short_description=archetype_short_description,
+            trait_levels=trait_levels,
+            rarity=rarity,
+        )
+        if len(user_prompt) > MAX_PERSONALITY_PROMPT_CHARS:
+            # Same defensive ceiling as the other prompts — unreachable in
+            # practice since every input is our own bounded output, never
+            # raw user text.
+            raise LLMProviderError(
+                "Constructed personality prompt exceeds the maximum allowed size"
+            )
+
+        return await self._call_tool(
+            system=personality_prompt.build_system_prompt(),
+            user_prompt=user_prompt,
+            tool=_build_personality_tool_schema(),
+            response_model=PersonalityInterpretation,
         )

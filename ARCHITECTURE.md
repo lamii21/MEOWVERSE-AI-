@@ -180,7 +180,7 @@ class LLMProvider(ABC):
         self, signals: CatSignals, profile: CatProfile, style: StoryStyle
     ) -> CatStory: ...  # Phase 7 — back on the ABC with a real schema
 
-class ImageGenerationProvider(ABC):  # Phase 13, still a null stub
+class ImageGenerationProvider(ABC):  # Phase 14, still a null stub
     async def generate_wallpaper(self, profile: CatProfile) -> dict: ...
     async def generate_avatar(self, profile: CatProfile) -> dict: ...
 ```
@@ -322,7 +322,7 @@ code-defined in `app/services/achievement_definitions.py` (same
 pattern as `STORY_STYLE_LABELS`), not a second table, since they never
 change per-request.
 
-**Deferred, not built this phase**: `generated_assets` (Phase 13 —
+**Deferred, not built this phase**: `generated_assets` (Phase 14 —
 nothing to generate yet; the Cat Card's "Generate Wallpaper" button is
 still an honest disabled placeholder). Favorites are a column, not a
 join table, since a cat has exactly one owner and "favorite" is
@@ -407,7 +407,7 @@ features/results/
   until the cat is owned), Download PNG (`html-to-image`, below),
   Generate Story (scrolls to the existing `StorySection`, does not
   duplicate its logic), Generate Wallpaper (disabled, labeled "Coming
-  in a future update" — Phase 13 territory, spec explicitly said
+  in a future update" — Phase 14 territory, spec explicitly said
   placeholder-only).
 - **PNG export**: `html-to-image`'s `toPng()` snapshots a ref'd DOM
   node (the card's visual content only — the action-button row sits
@@ -1132,3 +1132,142 @@ uses a manually-triggered `useMutation`, deliberately not an
 auto-fetching `useQuery` the way Phase 11's "Cats Like This" is) —
 keeping every analyze request's latency unaffected by a feature most
 views of a given cat will never invoke.
+
+## 25. Cat Personality: Deterministic Scoring Engine (Phase 13)
+
+**Non-negotiable framing** (spec-mandated): a cat's true personality
+cannot be reliably determined from a single photo. MeowVerse never
+claims otherwise anywhere in the product — every score is labeled
+"AI-inspired," every card carries an explicit disclaimer, and the
+three layers below are kept structurally distinct rather than merely
+documented as distinct.
+
+**Layer A — real/computed signals**: breed, `breed_confidence`, and
+fur colors, read directly off the already-stored `CatAnalysisModel`
+row for the source analysis. Phase 13 never re-runs breed or color
+inference — it is a pure downstream consumer of Phase 4/5's output.
+
+**Layer B — deterministic derived traits** (`app/services/personality_scoring.py`,
+`PERSONALITY_ENGINE_VERSION = "1.0"`): 8 traits (curiosity,
+playfulness, calmness, cuddliness, confidence, mischief, elegance,
+adventurousness), each computed by
+
+```
+confidence_scale = 0.7 + 0.3 * breed_confidence
+score = clamp(round(50 + confidence_scale * (breed_offset + color_offset + entropy_offset)), 0, 100)
+```
+
+- `breed_offset` — a documented per-breed, per-trait offset table
+  covering the 12 breeds the classifier knows (`_BREED_TRAIT_OFFSETS`).
+  This is the one place breed is allowed to influence personality, and
+  only as a small, capped, documented offset — never a direct
+  assignment (`if breed == "Siamese": curiosity = 95` is exactly the
+  pattern this design forbids).
+- `color_offset` — a small offset from the analysis's dominant fur
+  colors.
+- `entropy_offset` — a low-amplitude offset derived from
+  `sha256(str(analysis_id))`, seeded per-analysis (not per-image-content,
+  deliberately simpler than Phase 11's embedding dedup, avoiding a
+  cross-feature dependency). This exists purely so two cats of the same
+  breed and similar colors don't feel identical — it is documented in
+  the module docstring as **not a real behavioral signal**.
+- `breed_confidence` scales how strongly breed/color are allowed to
+  move a score away from a neutral 50 — a low-confidence prediction
+  produces trait scores that stay closer to neutral.
+
+No `random`/`np.random` import exists anywhere in this module —
+verified by a dedicated test. **Rarity and Grad-CAM data are never
+passed into this function at all** — not even as an unused parameter —
+verified respectively by `inspect.signature(compute_traits)` (no
+`rarity` parameter exists) and by the module docstring documenting the
+exclusion. This closes off both spec-forbidden fallacies structurally:
+rarity cannot imply confidence/friendliness, and "the model looked at
+the face" cannot imply affection.
+
+**Levels** (non-scientific, purely descriptive, exact thresholds):
+0-20 Very Low, 21-40 Low, 41-60 Balanced, 61-80 High, 81-100 Very High.
+
+## 26. Cat Personality: Archetypes & Determinism (Phase 13)
+
+10 hand-authored archetypes (`ARCHETYPES` in `personality_scoring.py`):
+Dreamy Explorer, Cozy Cuddlebug, Magical Mischief Maker, Tiny Royal,
+Gentle Soul, Chaos Bean, Mystic Whisker, Calm Wanderer, Confident
+Adventurer, Velvet Charmer. Each is a frozen dataclass carrying an id,
+name, emoji, short/long description, a `theme_token` (mapped to
+existing design tokens only — see §27), a catchphrase, and a partial
+trait centroid (unlisted traits implicitly default to 50).
+
+Selection is **nearest-centroid classification**: the archetype whose
+centroid is closest (Euclidean distance across all 8 traits) to the
+computed scores wins —
+
+```python
+min(ARCHETYPES, key=lambda a: sum((traits[t]["score"] - a.centroid.get(t, 50)) ** 2 for t in TRAITS))
+```
+
+— fully deterministic; ties resolve to definition order via Python's
+stable `min()`. The same analysis, run twice, always selects the same
+archetype. This is never an LLM decision and never involves randomness.
+
+## 27. Cat Personality: LLM Interpretation & Fallback (Phase 13)
+
+**Layer C — creative interpretation**: a `PersonalityInterpretation`
+(headline, description, catchphrase, secret_talent, fictional_job,
+fun_fact — all length-bounded via Pydantic `Field(max_length=...)`),
+generated by reusing the exact `LLMProvider` ABC pattern Phase 6/7
+established: a new `generate_personality_interpretation` abstract
+method, implemented as a forced tool-use call in
+`AnthropicLLMProvider` (via the shared `_call_tool` retry-once-on-invalid-schema
+helper) and as a raising stub in `NullLLMProvider`. No new Anthropic
+client code exists anywhere in Phase 13.
+
+**The schema itself makes score-tampering structurally impossible**:
+`PersonalityInterpretation` has no field for any trait score or
+archetype identity, so there is nothing in its shape an LLM could use
+to override Layer B even if a prompt injection attempted it — verified
+by a test asserting the model's field set contains none of the trait
+names or `archetype_id`.
+
+**Fallback** (`personality_interpretation_service.py`,
+`INTERPRETATION_VERSION = "1.0"`): on any failure — no API key,
+timeout, API error, invalid schema after retry, rate limit — the
+service returns one of 10 hand-written, **archetype-specific** demo
+interpretations (`_DEMO_INTERPRETATIONS`), never a single generic
+fallback, so even the always-honest no-key path still feels tailored.
+The response's `interpretation_mode` is set to `"generated"` or
+`"demo"` accordingly, and the frontend surfaces this directly (a
+visible "AI-generated" vs. "Offline demo content" badge) — never
+implying a real generation happened when it didn't.
+
+## 28. Cat Personality: Storage, Privacy & Caching (Phase 13)
+
+**Two tables, deliberately different caching semantics**, mirroring
+Phase 7's Story pattern but split further to make the Layer B/C
+separation load-bearing rather than just conventional:
+
+- `cat_personalities` — unique on `(analysis_id,
+  personality_engine_version)`. This unique constraint *is* the
+  staleness contract: a scoring-engine version bump automatically
+  makes every old row stale (no matching row exists for the new
+  version, so a fresh one gets computed), while regenerating creative
+  text never touches this table at all.
+- `personality_interpretations` — no unique constraint, append-only,
+  "latest row wins" (`get_latest_interpretation` orders by
+  `created_at desc limit 1`). Regenerating always inserts a new row
+  here and only here.
+
+**Privacy**: `GET /api/v1/analyses/{id}/personality` uses the same
+public-or-owned visibility check as every other Phase 9-12
+analysis-scoped endpoint (`get_current_user_optional`). `POST
+.../personality/regenerate` is deliberately **stricter** — real
+ownership only (`get_owned_analysis`), not "public OR owned" — a new
+architectural decision for this phase (not copied from an existing
+pattern): a stranger who can merely view a public cat must not be able
+to trigger new, potentially LLM-cost-bearing generations against
+someone else's cat. Both routes are behind the existing rate limiter
+(no new, incompatible limiter introduced).
+
+**Versioning**: every response records `personality_engine_version`,
+`interpretation_mode`, `interpretation_model` (nullable — null in demo
+mode), and `interpretation_version`, so any stored result is fully
+reproducible/auditable against the code that produced it.

@@ -136,13 +136,23 @@ class TestPrivacy:
         assert owner_cat["id"] not in ids
 
     def test_public_cats_are_visible_to_other_users(self, client, register_user):
+        # A distinctive, saturated, unusual color pair (not the common
+        # near-black/default-brown fixtures other tests in this file
+        # use) — the dev Postgres DB and FAISS index accumulate rows
+        # across every local test run (see conftest.py's `db_session`
+        # docstring), and with `k` capped at 20 (spec §12: never an
+        # arbitrary huge value), a color pair that clusters near many
+        # other tests' fixtures can eventually get crowded out of the
+        # top-20 purely by corpus growth, not a real bug. Distinctive
+        # colors keep this pair's mutual similarity dominant regardless
+        # of how large the shared dev corpus grows.
         register_user(display_name="Owner")
-        owner_cat = _upload(client, color=(1, 2, 3))
+        owner_cat = _upload(client, color=(12, 233, 178))
         client.post(f"/api/v1/analyses/{owner_cat['id']}/share")
         client.post("/api/v1/auth/logout")
 
         register_user(display_name="Searcher")
-        searcher_cat = _upload(client, color=(1, 2, 4))
+        searcher_cat = _upload(client, color=(12, 233, 179))
 
         result = _similar(client, searcher_cat["id"], k=20)
         ids = [c["analysis_id"] for c in result["similar_cats"]]
@@ -150,13 +160,13 @@ class TestPrivacy:
 
     def test_a_strangers_favorite_status_is_never_leaked(self, client, register_user):
         register_user(display_name="Owner")
-        owner_cat = _upload(client, color=(1, 2, 3))
+        owner_cat = _upload(client, color=(12, 233, 178))
         client.post(f"/api/v1/analyses/{owner_cat['id']}/favorite")
         client.post(f"/api/v1/analyses/{owner_cat['id']}/share")
         client.post("/api/v1/auth/logout")
 
         register_user(display_name="Searcher")
-        searcher_cat = _upload(client, color=(1, 2, 4))
+        searcher_cat = _upload(client, color=(12, 233, 179))
         result = _similar(client, searcher_cat["id"], k=20)
         matches = [c for c in result["similar_cats"] if c["analysis_id"] == owner_cat["id"]]
         assert matches and matches[0]["is_favorite"] is False

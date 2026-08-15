@@ -81,16 +81,28 @@ export function HowMeowVerseKnows({ result }: { result: AnalysisResult }) {
           ? "Foreground segmentation (GrabCut) then K-means clustering on the actual pixels of your photo."
           : "Demo mode right now — no trained model weights were available for this request.",
     },
+    {
+      icon: Brain,
+      label: "Personality trait scores",
+      source: "Deterministic rules engine",
+      detail:
+        "The 8 trait scores and archetype in the Cat Personality card below are computed by " +
+        "documented, non-random rules from the real breed and color signals above — never " +
+        "chosen or invented by an AI model. See \"How personality works\" in that card for the " +
+        "full breakdown.",
+    },
   ];
 
   const ai: KnowsRow[] = [
     {
       icon: Sparkles,
-      label: "Personality & rarity",
+      label: "Personality story & rarity",
       source: "Generative AI",
       detail:
-        "Written by a large language model, using the real breed and color signals above as " +
-        "creative inspiration. Playful, not a scientific personality assessment.",
+        "The headline, catchphrase, secret talent and story text in the Cat Personality card " +
+        "are written by a large language model from the trait scores above — creative flavor " +
+        "only, it cannot change the scores themselves. Rarity is also AI-flavored, not a " +
+        "scientific assessment.",
     },
     {
       icon: Wand2,

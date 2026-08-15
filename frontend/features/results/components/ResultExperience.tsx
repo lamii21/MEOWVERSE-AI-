@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { HowMeowVerseKnows } from "@/features/analyze/components/HowMeowVerseKnows";
 import { GradCamExplanation } from "@/features/explanation/components/GradCamExplanation";
+import { PersonalityCard } from "@/features/personality/components/PersonalityCard";
 import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
 import { StorySection } from "@/features/story/components/StorySection";
 
@@ -104,6 +105,7 @@ export function ResultExperience({
             </div>
           </div>
 
+          <PersonalityCard result={result} />
           <GradCamExplanation result={result} catImageUrl={catImageUrl} />
           <CatsLikeThis analysisId={result.id} />
         </>
