@@ -1,0 +1,61 @@
+{
+  "source": "https://www.robots.ox.ac.uk/~vgg/data/pets/",
+  "license": "CC BY-SA 4.0",
+  "num_classes": 12,
+  "classes": [
+    "Abyssinian",
+    "Bengal",
+    "Birman",
+    "Bombay",
+    "British Shorthair",
+    "Egyptian Mau",
+    "Maine Coon",
+    "Persian",
+    "Ragdoll",
+    "Russian Blue",
+    "Siamese",
+    "Sphynx"
+  ],
+  "total_images": 2371,
+  "train_images": 1658,
+  "val_images": 353,
+  "test_images": 360,
+  "split_ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  },
+  "images_per_class": {
+    "Abyssinian": 198,
+    "Bengal": 200,
+    "Birman": 200,
+    "Bombay": 184,
+    "British Shorthair": 200,
+    "Egyptian Mau": 190,
+    "Maine Coon": 200,
+    "Persian": 200,
+    "Ragdoll": 200,
+    "Russian Blue": 200,
+    "Siamese": 199,
+    "Sphynx": 200
+  },
+  "min_class_size": {
+    "breed": "Bombay",
+    "count": 184
+  },
+  "max_class_size": {
+    "breed": "Bengal",
+    "count": 200
+  },
+  "class_balance_ratio": 0.92,
+  "split_seed": 42,
+  "prepared_at": "2026-08-08T21:15:47.320096+00:00",
+  "duplicate_check": {
+    "method": "filename-set intersection across train/val/test directories",
+    "train_val_overlap": 0,
+    "train_test_overlap": 0,
+    "val_test_overlap": 0,
+    "verified_at": "2026-08-16 (Phase 16)"
+  },
+  "notes": "Both official Oxford-IIIT Pet splits (trainval + test) were pooled and re-split per-breed with a fixed seed (42) before this project's own train/val/test division \u2014 filename-level leakage was directly verified (zero overlap) as part of Phase 16 validation, not assumed."
+}

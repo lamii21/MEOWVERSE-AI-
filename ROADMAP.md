@@ -899,20 +899,86 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   confirms a cute, fully populated discovery page) → reduced motion →
   refresh persistence — all steps passed.
 
-## Phase 16 — Testing
-- ⬜ Backend: Pytest unit + integration + pipeline + API tests
-- ⬜ Frontend: component tests
-- ⬜ E2E: Playwright
+## Phase 16 — AI/ML Validation, Benchmarking & Final Quality Assurance ✅
+A validation/hardening pass, deliberately **not** a new feature phase
+— every AI/ML claim made in Phases 4–15 was independently re-measured
+against the actual repository rather than trusted from a prior phase's
+own report. Full findings: [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md).
+- ✅ Re-ran the real breed classifier evaluation from scratch —
+  byte-identical to the stored report (87.50% accuracy, 0.8747 macro
+  F1), confirming reproducibility, plus new metrics the original
+  evaluation didn't compute: 98.61% top-3 accuracy, a confidence
+  calibration table, and the honest finding that **4.4% of test
+  predictions (16/360) were confidently wrong** (confidence ≥0.8, incorrect).
+- ✅ Real non-cat robustness testing surfaced this phase's most
+  important finding: the classifier has **no cat/non-cat detection
+  gate** — a real dog photo (beagle) was classified "Abyssinian" at
+  94.52% confidence. Per the spec's explicit instruction not to bolt
+  on a second model without a scoped proposal, no gate was added —
+  documented as a real limitation and proposed as future scoped work.
+- ✅ 18 real/synthetic image edge cases (tiny/huge/wide/tall/grayscale/
+  RGBA/corrupted/truncated/empty/low-light/overexposed/partial-crop)
+  run through the actual production pipeline — zero crashes, safe
+  rejection via the existing `InvalidImageError` where appropriate,
+  2 cases honestly marked `NOT VERIFIED` rather than simulated.
+- 🐛 **Two real, previously-undiscovered bugs found and fixed**: (1)
+  `cv2.grabCut` (fur color analysis) draws from OpenCV's own global
+  RNG, a separate generator from the `KMeans(random_state=42)` right
+  next to it — measured non-deterministic (3 different masks across 5
+  identical calls), fixed with `cv2.setRNGSeed(42)`, regression test
+  added. (2) The `openai` SDK (added Phase 14) logs on its own logger
+  tree, never added to `configure_logging`'s existing
+  `httpx`/`httpcore`/`anthropic` suppression list — would have logged
+  request/response payloads at this app's `debug=True` default, fixed
+  by adding it, regression test added.
+- 🐛 **Durably fixed a twice-recurring `test_similarity.py` flake**
+  (Phase 13 had "fixed" it once with a more distinctive hardcoded
+  fixture color, which just delayed the same bug) — the real root
+  cause was content-hash embedding dedup being global and permanent,
+  so every previous local test run using the same hardcoded color
+  silently left another perfectly-tied analysis behind (52 found
+  sharing one `vector_id`). Fixed with a run-unique `uuid4`-derived
+  fixture color instead of a hardcoded one.
+- ✅ Real similarity-engine performance measured (not reused from
+  Phase 11): embedding generation ~43ms mean, FAISS search ~9ms mean/
+  ~0.3ms median (n=20, warm), full `/similar` endpoint ~524ms mean warm.
+- ✅ Security/privacy re-audit: path traversal, malicious filenames,
+  oversized/corrupted/wrong-type uploads, error-response leakage, and
+  cross-user data isolation all re-confirmed with no new findings
+  beyond the two bugs above.
+- ✅ Full regression re-run clean: **429/429 backend tests** (was
+  426 — 2 new regression tests for the bugs above), ruff clean;
+  **193/193 frontend tests**, lint/build clean (frontend untouched
+  this phase).
+- ✅ No fabricated metrics anywhere in this phase's output — every
+  number above came from an actual script run against this repository;
+  both LLM/image-generation providers are honestly reported
+  `NOT VERIFIED LIVE` (no API keys configured in this environment).
 
-## Phase 17 — Docker & CI/CD
-- ⬜ Dockerfiles (frontend, backend), full Compose stack
-- ⬜ GitHub Actions: lint, test, build gates
+## Phase 17 — Production Readiness
+Docker/CI-CD hardening, closing the honest gaps Phase 16 surfaced, and
+formal test-suite expansion. Not started.
+- ⬜ Backend Docker image installing `requirements-ml.txt` (known gap
+  since Phase 4 — the containerized API currently always runs in demo
+  mode for breed/color analysis)
+- ⬜ GitHub Actions gates for the full stack (lint, test, build — CI
+  scaffold exists from Phase 1, needs extending to ML/frontend build steps)
+- ⬜ S3-compatible `ImageStorageProvider` (Phase 9's interface is
+  already shaped for this swap) so uploaded photos survive a redeploy
+- ⬜ Redis-backed `RateLimiter` implementation (protocol already exists
+  from Phase 9) for multi-instance deployment
+- ⬜ Password reset / email verification flow (no email infrastructure
+  exists yet — known gap since Phase 9)
+- ⬜ A cat/non-cat detection gate (AI_VALIDATION_REPORT.md's
+  highest-value scoped follow-up) — only if this phase chooses to
+  scope it in, per Phase 16's explicit recommendation not to bolt one
+  on without a real proposal
+- ⬜ Accessibility, responsive, and general performance passes
 
-## Phase 18 — Documentation
-- ⬜ Full README (features, architecture, setup, API, roadmap, etc.)
-
-## Phase 19 — Final Polish
-- ⬜ Accessibility pass, responsive pass, performance pass, security pass
+## Phase 18 — Final Portfolio Release
+- ⬜ Full README (features, screenshots, API reference, deployment guide)
+- ⬜ Final documentation pass across ARCHITECTURE.md/PROJECT_STATUS.md/ROADMAP.md
+- ⬜ Final security pass
 
 ---
 

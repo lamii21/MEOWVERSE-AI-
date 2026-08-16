@@ -1,0 +1,57 @@
+{
+  "measurement_date": "2026-08-16",
+  "environment": {
+    "hardware": "local development machine, Windows 11, CPU-only inference (no CUDA available)",
+    "server": "single uvicorn process, dev mode",
+    "database": "local Postgres via docker compose, host port 5433",
+    "note": "All latency figures below are from THIS environment only. Never compare against a different machine/deployment without re-measuring."
+  },
+  "breed_classification": {
+    "model": "mobilenet_v3_small, 224x224 input",
+    "note": "Per-image inference latency was not isolated as a standalone benchmark in this phase; see Phase 4-era measurements in prior PROJECT_STATUS.md entries for historical figures. NOT RE-VERIFIED this phase — labeled historical, not re-measured."
+  },
+  "similarity_engine": {
+    "embedding_generation_latency_ms": {
+      "sample_size": 10,
+      "condition": "warm (model already loaded, one warm-up call excluded)",
+      "mean": 43.04,
+      "median": 42.46,
+      "min": 39.67,
+      "max": 48.18,
+      "p95_approx": 48.18
+    },
+    "faiss_search_latency_ms": {
+      "sample_size": 20,
+      "condition": "warm, index_size=125 vectors",
+      "mean": 9.033,
+      "median": 0.307,
+      "max": 174.48,
+      "note": "Mean is skewed by one outlier (174.48ms, likely a one-time cache/JIT warm-up cost, consistent with similar single-outlier patterns observed for OpenCV operations in Phase 12). Median (0.307ms) is the more representative steady-state figure."
+    },
+    "full_similarity_endpoint_latency_s": {
+      "cold_first_request": 9.259,
+      "cold_note": "Includes the one-time `import torch` cost on first touch of the embedding model singleton in a fresh process — documented since Phase 11, not a Phase 16 regression.",
+      "warm_sample_size": 10,
+      "warm_mean": 0.524,
+      "warm_median": 0.519,
+      "warm_p95_approx": 0.680,
+      "warm_min": 0.378,
+      "warm_max": 0.695
+    }
+  },
+  "grad_cam": {
+    "note": "Per-call latency historical figures (Phase 12 measurement): explain() mean 61.0ms, heatmap+overlay rendering mean 39.4ms, full endpoint cache-miss 505ms, cache-hit mean ~220ms. NOT RE-MEASURED this phase — labeled historical.",
+    "live_sanity_check_this_phase": {
+      "endpoint": "POST /api/v1/analyses/{id}/explanation",
+      "single_real_request_time_s": 0.806,
+      "result": "real heatmap generated, no NaN/Inf, target_layer=features.12, cached correctly"
+    }
+  },
+  "explore_endpoints": {
+    "note": "Full measurements (mean/median for cats/featured/breeds/personalities/colors, plus exact N+1 query count) were taken in Phase 15 against a 538-public-cat dataset. See PROJECT_STATUS.md's 'Real Results (Phase 15)' section for the complete figures — not repeated here to avoid re-stating without re-running; treated as historical for this phase's report unless re-verified."
+  },
+  "api_key_backed_providers": {
+    "anthropic_llm": "NOT VERIFIED — no ANTHROPIC_API_KEY configured in this environment",
+    "openai_image_generation": "NOT VERIFIED — no IMAGE_GENERATION_API_KEY/OPENAI_API_KEY configured in this environment"
+  }
+}

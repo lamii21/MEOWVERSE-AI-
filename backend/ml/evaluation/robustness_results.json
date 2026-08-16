@@ -1,0 +1,237 @@
+{
+  "evaluation_date": "2026-08-16T14:11:05.176047+00:00",
+  "model_version": "0.1.0",
+  "cases": [
+    {
+      "case": "non_cat_person",
+      "validation": "accepted",
+      "dimensions": "512x600",
+      "mode": "RGB",
+      "breed_prediction": "Sphynx",
+      "breed_confidence": 0.7895076274871826,
+      "color_prediction": [
+        "caramel",
+        "black",
+        "lilac"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "non_cat_landscape_building",
+      "validation": "accepted",
+      "dimensions": "640x427",
+      "mode": "RGB",
+      "breed_prediction": "Bengal",
+      "breed_confidence": 0.5805935859680176,
+      "color_prediction": [
+        "black",
+        "brown",
+        "caramel"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "non_cat_flower",
+      "validation": "accepted",
+      "dimensions": "640x427",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.9275933504104614,
+      "color_prediction": [
+        "tan",
+        "orange",
+        "ginger"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "non_cat_dog_beagle",
+      "validation": "accepted",
+      "dimensions": "500x400",
+      "mode": "RGB",
+      "breed_prediction": "Abyssinian",
+      "breed_confidence": 0.9452470541000366,
+      "color_prediction": [
+        "black",
+        "cinnamon",
+        "silver"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "non_cat_dog_boxer",
+      "validation": "accepted",
+      "dimensions": "500x333",
+      "mode": "RGB",
+      "breed_prediction": "Siamese",
+      "breed_confidence": 0.6124481558799744,
+      "color_prediction": [
+        "black",
+        "blue",
+        "lilac"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_tiny_32x32",
+      "status": "rejected_by_validation",
+      "error": "Image is too small \u2014 minimum 64x64px."
+    },
+    {
+      "case": "edge_small_80x80",
+      "validation": "accepted",
+      "dimensions": "80x80",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.9754574298858643,
+      "color_prediction": [
+        "ivory",
+        "tan",
+        "brown"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_huge_4000x4000",
+      "validation": "accepted",
+      "dimensions": "4000x4000",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.9997819066047668,
+      "color_prediction": [
+        "cinnamon",
+        "chocolate",
+        "tan"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_extremely_wide_2000x100",
+      "validation": "accepted",
+      "dimensions": "2000x100",
+      "mode": "RGB",
+      "breed_prediction": "Ragdoll",
+      "breed_confidence": 0.1519986242055893,
+      "color_prediction": [
+        "ivory",
+        "tan",
+        "cinnamon"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_extremely_tall_100x2000",
+      "validation": "accepted",
+      "dimensions": "100x2000",
+      "mode": "RGB",
+      "breed_prediction": "Ragdoll",
+      "breed_confidence": 0.16862910985946655,
+      "color_prediction": [
+        "ivory",
+        "tan",
+        "cinnamon"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_grayscale",
+      "validation": "accepted",
+      "dimensions": "500x334",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.9995904564857483,
+      "color_prediction": [
+        "silver",
+        "gray",
+        "charcoal"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_rgba_png",
+      "validation": "accepted",
+      "dimensions": "500x334",
+      "mode": "RGBA",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.999985933303833,
+      "color_prediction": [
+        "cinnamon",
+        "chocolate",
+        "tan"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_corrupted_truncated",
+      "status": "rejected_by_validation",
+      "error": "MeowVerse needs a valid image."
+    },
+    {
+      "case": "edge_corrupted_garbage",
+      "status": "rejected_by_validation",
+      "error": "MeowVerse needs a valid image."
+    },
+    {
+      "case": "edge_empty_bytes",
+      "status": "rejected_by_validation",
+      "error": "MeowVerse needs a valid image."
+    },
+    {
+      "case": "edge_low_light",
+      "validation": "accepted",
+      "dimensions": "500x334",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.9915199875831604,
+      "color_prediction": [
+        "black",
+        "black",
+        "black"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_backlit_overexposed",
+      "validation": "accepted",
+      "dimensions": "500x334",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.18026161193847656,
+      "color_prediction": [
+        "tan",
+        "cream",
+        "chocolate"
+      ],
+      "status": "ok"
+    },
+    {
+      "case": "edge_partially_visible_crop",
+      "validation": "accepted",
+      "dimensions": "250x167",
+      "mode": "RGB",
+      "breed_prediction": "Persian",
+      "breed_confidence": 0.8128958344459534,
+      "color_prediction": [
+        "gray",
+        "brown",
+        "lilac"
+      ],
+      "status": "ok"
+    }
+  ],
+  "not_tested": [
+    {
+      "case": "multiple_cats_in_frame",
+      "status": "NOT VERIFIED",
+      "reason": "No real multi-cat photo available in this environment's image sources (held-out test set is single-cat-per-image by dataset construction; no second real multi-cat image source was available to fetch). Not simulated."
+    },
+    {
+      "case": "cat_far_away_or_close_up",
+      "status": "NOT VERIFIED",
+      "reason": "No real photo with these specific framing characteristics was available in this environment beyond the standard dataset crops already covered by the held-out evaluation set."
+    }
+  ],
+  "crash_count": 0,
+  "rejected_by_validation_count": 4,
+  "ok_count": 14
+}

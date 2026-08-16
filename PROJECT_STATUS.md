@@ -4,11 +4,14 @@ _Last updated: 2026-08-16_
 
 ## Current Phase
 
-**Phase 15 — MeowVerse Cat Universe: Social Discovery & Public Cat
-Exploration: complete and verified end-to-end.** Phase 16 (a formal,
-dedicated Testing pass) is next, not yet started. A real rate-limiting
-bug was found and fixed live during this phase's own E2E testing — see
-"Real Results (Phase 15)" below.
+**Phase 16 — AI/ML Validation, Benchmarking & Final Quality Assurance:
+complete.** A validation/hardening pass, not a new feature phase — see
+[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) for the full,
+honest scorecard. Two real bugs were found and fixed this phase (fur
+color non-determinism, an unsuppressed `openai` SDK logger), plus a
+durable fix for a pre-existing, twice-recurring test-fixture pollution
+issue in the similarity test suite. Phase 17 (Production Readiness) is
+next, not yet started.
 
 ## What Exists
 
@@ -376,6 +379,70 @@ bug was found and fixed live during this phase's own E2E testing — see
     `DiscoveryColorExplorer`, and a page-level integration test).
     **193/193 frontend tests passing** (was 150), lint/build clean.
 
+## What Exists (Phase 16 additions)
+
+Phase 16 was explicitly a validation/hardening pass, not a feature
+phase (spec §33: "do not overengineer") — its additions are
+evaluation tooling and two real bug fixes, not new product surface.
+
+- `backend/ml/evaluation/phase16_validate.py` — extends the existing
+  `evaluate.py` with top-1/top-3 accuracy, confidence-calibration
+  buckets, high-confidence-wrong-prediction detection, confusion
+  matrix analysis (strongest/weakest classes, top confusion pairs),
+  and a rendered `confusion_matrix.png`. Writes
+  `ml/evaluation/classification_results.json`.
+- `backend/ml/evaluation/phase16_robustness.py` — runs the real
+  production pipeline (`_load_and_validate_image` →
+  `BreedClassifier.predict` → `FurColorAnalyzer.predict`) against real
+  non-cat photos (person, dog ×2, landscape, flower) and 13 synthetic
+  image edge cases (tiny/huge/extreme-aspect-ratio/grayscale/RGBA/
+  corrupted/empty/low-light/overexposed/partially-cropped), honestly
+  marking the 2 cases with no real available test image (multi-cat
+  frames, extreme far/close framing) as `NOT VERIFIED` rather than
+  simulating them. Writes `ml/evaluation/robustness_results.json`.
+- `ml/evaluation/dataset_report.json` — real dataset statistics plus a
+  direct, this-phase filename-overlap check across train/val/test
+  (zero found).
+- `ml/evaluation/benchmark_results.json` — consolidated real latency
+  measurements for the similarity engine and a live Grad-CAM sanity
+  check, each clearly labeled with sample size and whether it was
+  re-measured this phase or is historical.
+- **Real bug #1 — fur color non-determinism, found and fixed**:
+  `app/ml/fur_color.py`'s `cv2.grabCut` call had no RNG seed (only the
+  downstream `KMeans` did), so repeated calls on byte-identical input
+  produced different foreground masks and therefore different color
+  swatches. Fixed with `cv2.setRNGSeed(42)`; a regression test
+  (`test_predict_is_deterministic_on_a_real_photo_across_repeated_calls`)
+  was added to `tests/test_fur_color.py`.
+- **Real bug #2 — an unsuppressed third-party SDK logger, found and
+  fixed**: `app/core/logging.py` suppressed `anthropic`'s logger to
+  `WARNING` but never added `openai`'s (added in Phase 14) — a
+  separate logger namespace, so with this app's `debug=True` default
+  it would have inherited `DEBUG` and could log request/response
+  detail. Fixed by adding the same suppression; a new test file
+  (`tests/test_logging_config.py`) was added.
+- **A pre-existing, twice-recurring test-fixture bug, durably fixed**:
+  `test_similarity.py::TestPrivacy`'s two tests had already been
+  "fixed" once in Phase 13 (a more "distinctive" hardcoded color) and
+  failed again this phase for the same underlying reason — a
+  hardcoded fixture color is never actually run-unique, and Phase 11's
+  content-hash embedding dedup is global and permanent, so *every*
+  previous local regression run silently left behind another analysis
+  row sharing the same vector (52 found sharing one `vector_id` by
+  direct measurement). Fixed durably this time: the two uploads within
+  one test run now share byte-identical content (a guaranteed,
+  unbeatable 1.0 similarity score) generated fresh from `uuid4` on
+  every run (so this run's fixture can never collide with any other
+  run's, past or future) — see `tests/test_similarity.py`'s
+  `_unique_color()` docstring for the full, measured diagnosis.
+- **AI_VALIDATION_REPORT.md** — the full scorecard, dataset/model/
+  robustness/security/privacy findings, and an honest VERIFIED /
+  PARTIALLY VERIFIED / NOT VERIFIED claims summary. See that file for
+  everything this phase found — not duplicated here in full.
+- Backend: **429/429 tests passing** (was 426 — 2 new test files plus
+  1 extended one), ruff clean. Frontend: unchanged this phase (no
+  frontend code touched), re-confirmed still 193/193 passing.
+
 ## Real Results (Phase 12)
 
 - **Both suites green**: 246/246 backend (pytest, real trained
@@ -701,6 +768,75 @@ script's reduced-motion step: zero console errors, confirmed twice
     confirmed both by instrumented measurement and a dedicated test —
     see above.
 
+## Real Results (Phase 16)
+
+- **The full scorecard, findings, and honest VERIFIED/NOT VERIFIED
+  claims summary live in [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md)**
+  — this section intentionally doesn't duplicate it in full.
+- **Breed classifier re-evaluated, not just cited**: re-running the
+  real evaluation script this phase produced byte-identical accuracy
+  (87.50% top-1) to the previously stored report, confirming full
+  reproducibility. New this phase: top-3 accuracy (**98.61%**), and a
+  direct confidence-calibration pass that found **16 of 360 test
+  predictions (4.4%) were confidently (≥80%) wrong** — a real,
+  previously-unmeasured finding, surfaced honestly rather than
+  smoothed into an aggregate accuracy number.
+- **The most important finding in this phase**: MeowVerse's breed
+  classifier has no cat/non-cat gate. Tested directly against 5 real
+  non-cat photos — a real photo of a dog was classified "Abyssinian"
+  at **94.52% confidence**. Evaluated and documented, per this phase's
+  explicit instruction *not* to add a new model to fix it — a
+  cat/non-cat gate is proposed as a scoped future phase, not built
+  here.
+- **Zero crashes across 18 real edge-case/non-cat inputs** — including
+  a 4000×4000 image, extreme aspect ratios, grayscale, RGBA, a
+  truncated JPEG, and empty bytes. 4 were correctly rejected by
+  existing input validation; 14 processed without error.
+- **A real, previously-undocumented non-determinism bug was found and
+  fixed**: the fur-color pipeline's GrabCut segmentation step had no
+  RNG seed, producing different results across repeated calls on
+  identical input — direct measurement showed 5 calls produce 3
+  distinct outputs before the fix, 1 identical output after it.
+- **A real logging/secret-exposure gap was found and fixed**: the
+  `openai` SDK's logger (added in Phase 14) was never added to the
+  existing third-party-logger suppression list `anthropic` already
+  had — fixed to match.
+- **A pre-existing, twice-recurring test flakiness bug was root-caused
+  and durably fixed** (not just patched a third time) — see "What
+  Exists (Phase 16 additions)" above for the full diagnosis.
+- **Both LLM/image-generation providers remain honestly `NOT VERIFIED
+  LIVE`** — confirmed directly this phase via `get_llm_provider()`/
+  `get_image_generation_provider()`, both resolving to their Null
+  fallback, no key configured for either.
+- **Regression**: 429/429 backend tests passing (was 426), ruff clean.
+  Frontend untouched, re-confirmed 193/193 passing.
+- **Full-stack regression re-confirmed fresh this phase, not reused
+  from Phase 15**: 429/429 backend (`pytest`), ruff clean, 193/193
+  frontend (`vitest`), `eslint` clean, `next build` production build
+  clean — every one of these was actually re-run this phase, not
+  assumed from a prior phase's numbers.
+- **Live browser E2E** against real `uvicorn`/`next dev` servers,
+  scripted with Playwright (no project Playwright config existed yet,
+  so a standalone script was used, same pattern as every prior phase's
+  E2E): guest landing → upload a real Persian photo → analysis with a
+  real breed/confidence/fur-color result → Grad-CAM ("Why this
+  breed?") → personality card → story generation → Portrait Studio →
+  guest Save prompt → register → re-analyze while authenticated →
+  Collection ("My Cat Universe," real stats) → Explore → search →
+  breed filter → logout → login → **collection persists after
+  re-login** → a second, unshared analysis confirmed **404 to a
+  stranger** (private isolation) → mobile viewport (375px) → reduced
+  motion. Zero unexpected console errors — the only console/network
+  entries were the architecturally-expected guest `/me` 401 (Phase 9)
+  and correct owner-only 404s for an unclaimed guest analysis.
+  A separate, isolated follow-up script specifically re-verified the
+  Collection → detail-page → Favorite/Share flow (the one step the
+  main run's screenshot caught mid-hydration, before the buttons had
+  rendered): confirmed the `/collection/[id]` navigation and both
+  buttons render correctly once given time to settle after a
+  client-side route change — a test-script timing gap, not a product
+  bug, and not glossed over rather than reported honestly here.
+
 ## What Does Not Exist Yet
 
 Advanced analytics, a mobile app, comments, direct messages, a
@@ -816,21 +952,45 @@ phase; see Known Limitations). See ROADMAP.md Phases 16–19.
   cat's popularity is instead represented honestly via the new, real
   `most_discovered` sort (a genuine visitor count), never a fabricated
   like/heart tally.
+- **No cat/non-cat detection gate exists** (Phase 16 finding, the most
+  important one in this report) — the breed classifier will confidently
+  assign a specific cat breed to any valid image, including real,
+  clearly-non-cat photos (a dog photo scored "Abyssinian" at 94.52%
+  confidence in direct testing). Evaluated and documented per Phase 16
+  spec §8's explicit instruction not to bolt on a new model without a
+  scoped implementation plan — proposed as a future phase, not built.
+  See AI_VALIDATION_REPORT.md §7.
+- **4.4% of breed-classifier test predictions are confidently (≥80%)
+  wrong** (16 of 360 real test-set images) — a real, measured rate,
+  not previously surfaced this explicitly. See
+  AI_VALIDATION_REPORT.md §6.
+- **No formal similarity retrieval benchmark exists** — there is no
+  labeled "these two specific photos are the same cat" ground-truth
+  dataset available, and none was invented. Mathematical correctness
+  (identical/orthogonal/opposite/ranked vector tests) and real
+  qualitative retrieval are verified instead; formal retrieval
+  accuracy is explicitly `NOT VERIFIED`, not approximated.
+- **Fur color remains a visual estimation, not a colorimetric
+  measurement** (unchanged framing since Phase 5) — now additionally
+  confirmed *deterministic* as of Phase 16's bug fix, which it wasn't
+  before.
 - Previously noted limitations (no live Anthropic/`gpt-image-1` API
   call tested, local dev Postgres on port 5433, the ML-less Docker
   image, `vitest.config.ts`'s `pool: "threads"`, single global FAISS
-  index with SQL-enforced privacy) are unchanged from Phase 9–14.
+  index with SQL-enforced privacy, no Open Graph metadata for
+  `/explore`) are unchanged from Phase 9–15.
 
 ## Next Steps
 
-Begin Phase 16: a formal, dedicated Testing pass — the next
-un-started item in ROADMAP.md. Keep extending the existing
-`vitest`/`pytest` suites for any new component/endpoint going
-forward — the gap worth avoiding is a phase skipping its own tests (as
-Phase 13 briefly did), not a missing test runner. If a real
-`ANTHROPIC_API_KEY` or `IMAGE_GENERATION_API_KEY` ever becomes
-available in this environment, a live-call smoke test for both
-providers would be a high-value, currently-missing piece of
+Begin Phase 17: Production Readiness — the next un-started item in
+ROADMAP.md (Docker/CI-CD hardening, formal component/E2E test
+expansion, and closing the remaining honest gaps this report
+surfaces). A cat/non-cat detection gate (AI_VALIDATION_REPORT.md §7)
+is the single highest-value scoped follow-up if a future phase wants
+to address it — genuinely useful, deliberately not built in Phase 16.
+If a real `ANTHROPIC_API_KEY` or `IMAGE_GENERATION_API_KEY` ever
+becomes available in this environment, a live-call smoke test for both
+providers remains a high-value, currently-missing piece of
 verification. Open Graph metadata for `/explore` and its filtered
 views would be a reasonable, scoped follow-up before Phase 15's
 discovery feature is considered fully polished for sharing.
@@ -975,3 +1135,39 @@ discovery feature is considered fully polished for sharing.
   cache-key unique constraint, the two-table cheap-core/expensive-extra
   caching split, schema-shape-as-guarantee over prompt instructions,
   shared-dev-corpus test flakiness) all still apply.
+- **"Fix" a flaky test by removing the actual source of non-uniqueness,
+  not by picking a more distinctive constant** — Phase 13 first hit
+  `test_similarity.py`'s fixture-pollution bug and patched it with a
+  more "distinctive" hardcoded color; Phase 16 hit the *same* test
+  failing again, for the *same* underlying reason, because a hardcoded
+  constant re-run across many local regression cycles is never
+  actually unique — only the specific *value* changed, not the fact
+  that it was reused every run. Direct measurement (querying the DB
+  for how many rows shared one `vector_id`) found 52 accumulated
+  duplicates before diagnosing this properly. The durable fix
+  generates the fixture value fresh (`uuid4`) on every single test
+  run, which no amount of repeated local execution can ever collide
+  with itself. When a "fixed" flaky test flakes again later, the right
+  question is "why did the fix stop working," not "what's a better
+  constant" — a recurring flake is itself a signal the first fix
+  treated a symptom.
+- **A library call that accepts one seed parameter doesn't mean every
+  source of randomness in the pipeline is seeded** — `cv2.grabCut` sits
+  immediately upstream of `KMeans(random_state=42)` in the fur-color
+  pipeline, and it would be reasonable to assume the pipeline was
+  therefore fully deterministic. It wasn't: OpenCV's GrabCut draws from
+  its *own* internal RNG (`cv2.setRNGSeed`), entirely separate from
+  scikit-learn's `random_state` mechanism, silently. Worth explicitly
+  testing determinism end-to-end (call the real public method N times,
+  compare outputs) rather than inferring it from seeing one seed
+  parameter set somewhere in the call chain.
+- **When adding a new third-party SDK, check whether it needs the same
+  logging treatment as the SDKs already suppressed** — `anthropic`'s
+  logger was deliberately suppressed to `WARNING` in Phase 6 with a
+  clear rationale (it can echo request/response payloads at `DEBUG`,
+  including auth headers). `openai` (Phase 14) has the exact same risk
+  profile and its own separate logger namespace, but wasn't added to
+  the same list — an easy thing to miss because the app kept working
+  fine either way; the gap was only visible by actually reading
+  `configure_logging` line by line and asking "does this cover every
+  AI SDK currently imported," not by anything failing.

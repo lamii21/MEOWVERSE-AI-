@@ -128,6 +128,17 @@ small fur-relevant reference palette. Documented in
 perceptually-calibrated color-science technique) — good enough for a
 playful palette display, not presented as more rigorous than it is.
 
+Phase 16 finding: `cv2.grabCut`'s internal GMM/EM initialization draws
+from OpenCV's own global RNG, a separate generator from Python's
+`random`, numpy's, and scikit-learn's `random_state` — so the
+K-means `random_state=42` above had no effect on GrabCut's own
+non-determinism. Measured directly: 5 back-to-back calls on
+byte-identical input produced 3 different foreground masks before the
+fix. Fixed by calling `cv2.setRNGSeed(42)` immediately before
+`cv2.grabCut(...)` in `app/ml/fur_color.py`; the pipeline is now
+confirmed deterministic end-to-end (regression test in
+`tests/test_fur_color.py`).
+
 There is no separate "cat detection" step: the classifier itself is
 cat-only (trained exclusively on cat breeds), so an image of a dog or
 non-cat currently gets a (low-confidence, meaningless) breed label

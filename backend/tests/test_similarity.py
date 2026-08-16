@@ -1,4 +1,5 @@
 import io
+import uuid
 
 import pytest
 from PIL import Image
@@ -10,6 +11,24 @@ def _make_jpeg_bytes(size=(128, 128), color=(200, 150, 100)) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", size, color).save(buf, format="JPEG")
     return buf.getvalue()
+
+
+def _unique_color() -> tuple[int, int, int]:
+    """A fresh, run-unique RGB color (Phase 16 finding — see the
+    `TestPrivacy` tests below): a *hardcoded* fixture color is not
+    actually run-unique — content-hash-based embedding dedup (Phase 11)
+    is global and permanent, so every previous local run of the same
+    hardcoded-color test silently left behind another analysis row
+    pointing at the same vector_id. Confirmed by direct measurement:
+    52 separate analyses had accumulated under one hardcoded fixture
+    color across this session's repeated full-regression runs, so with
+    `k` capped at 20 (spec §12), the specific pair created by any one
+    run could get arbitrarily crowded out of the top-20 by up to 51
+    *other* historical ties at the same perfect score — not a real
+    privacy/correctness bug, a test-fixture uniqueness bug. A fresh
+    `uuid4`-derived color makes every run's fixture content, and
+    therefore its `vector_id`, genuinely unique."""
+    return tuple(uuid.uuid4().bytes[:3])
 
 
 def _upload(client, color=(200, 150, 100)) -> dict:
@@ -136,37 +155,38 @@ class TestPrivacy:
         assert owner_cat["id"] not in ids
 
     def test_public_cats_are_visible_to_other_users(self, client, register_user):
-        # A distinctive, saturated, unusual color pair (not the common
-        # near-black/default-brown fixtures other tests in this file
-        # use) — the dev Postgres DB and FAISS index accumulate rows
-        # across every local test run (see conftest.py's `db_session`
-        # docstring), and with `k` capped at 20 (spec §12: never an
-        # arbitrary huge value), a color pair that clusters near many
-        # other tests' fixtures can eventually get crowded out of the
-        # top-20 purely by corpus growth, not a real bug. Distinctive
-        # colors keep this pair's mutual similarity dominant regardless
-        # of how large the shared dev corpus grows.
+        # Durable fix (see `_unique_color`'s docstring for the full,
+        # measured root cause): byte-identical content between the two
+        # uploads gives them the exact same `vector_id` via content-hash
+        # dedup, so their cosine similarity is mathematically exactly
+        # 1.0 — but the color itself must also be fresh *every run*,
+        # not a hardcoded constant, or repeated local test runs quietly
+        # accumulate their own crowd of historical ties at that same
+        # perfect score.
+        color = _unique_color()
         register_user(display_name="Owner")
-        owner_cat = _upload(client, color=(12, 233, 178))
+        owner_cat = _upload(client, color=color)
         client.post(f"/api/v1/analyses/{owner_cat['id']}/share")
         client.post("/api/v1/auth/logout")
 
         register_user(display_name="Searcher")
-        searcher_cat = _upload(client, color=(12, 233, 179))
+        searcher_cat = _upload(client, color=color)  # byte-identical to owner_cat
 
         result = _similar(client, searcher_cat["id"], k=20)
         ids = [c["analysis_id"] for c in result["similar_cats"]]
         assert owner_cat["id"] in ids
 
     def test_a_strangers_favorite_status_is_never_leaked(self, client, register_user):
+        # Same run-unique, byte-identical-content fix as the test above.
+        color = _unique_color()
         register_user(display_name="Owner")
-        owner_cat = _upload(client, color=(12, 233, 178))
+        owner_cat = _upload(client, color=color)
         client.post(f"/api/v1/analyses/{owner_cat['id']}/favorite")
         client.post(f"/api/v1/analyses/{owner_cat['id']}/share")
         client.post("/api/v1/auth/logout")
 
         register_user(display_name="Searcher")
-        searcher_cat = _upload(client, color=(12, 233, 179))
+        searcher_cat = _upload(client, color=color)  # byte-identical to owner_cat
         result = _similar(client, searcher_cat["id"], k=20)
         matches = [c for c in result["similar_cats"] if c["analysis_id"] == owner_cat["id"]]
         assert matches and matches[0]["is_favorite"] is False

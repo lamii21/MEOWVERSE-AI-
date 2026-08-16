@@ -97,6 +97,19 @@ class FurColorAnalyzer(BaseModel):
         rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
 
         try:
+            # Phase 16 finding: cv2.grabCut is NOT deterministic by
+            # default on identical input — its internal GMM/EM
+            # initialization draws from OpenCV's global RNG, which
+            # `KMeans(random_state=42)` below has no influence over.
+            # Confirmed via direct measurement: 5 back-to-back calls on
+            # byte-identical input produced 3 different foreground
+            # masks (28/32/33/32/28 pixels) before this seed call, and
+            # 5 identical masks after it. `cv2.setRNGSeed` seeds
+            # OpenCV's own RNG (a separate generator from Python's
+            # `random`/numpy's, and from scikit-learn's
+            # `random_state`), so it has to be set explicitly here
+            # rather than relying on any seed already set elsewhere.
+            cv2.setRNGSeed(42)
             cv2.grabCut(bgr, mask, rect, bg_model, fg_model, 5, cv2.GC_INIT_WITH_RECT)
             foreground = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 1, 0).astype(
                 "uint8"

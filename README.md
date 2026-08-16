@@ -14,9 +14,61 @@ This README is intentionally minimal during early development. See:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design, folder structure, AI/ML pipeline
 - [ROADMAP.md](ROADMAP.md) — phased build plan and current progress
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) — what's done, what's next
+- [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) — independent
+  measurement and validation of every AI/ML component: real accuracy,
+  calibration, robustness, latency, and honest limitations — no
+  fabricated metrics
 
 A full README (features, screenshots, API reference, deployment guide)
 is written in Phase 18 once the product is functional end to end.
+
+## The AI/ML techniques, honestly
+
+MeowVerse combines several distinct AI/ML techniques. Every one of
+them is described throughout this README with the same rule: **never
+claim more certainty than a real measurement supports.** For the
+underlying model architecture, dataset, evaluation methodology, and
+measured numbers behind every claim below, see
+[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md).
+
+| Technique | Where | What it is |
+|---|---|---|
+| **Computer Vision — CNN classification** | Breed prediction | MobileNetV3-Small, fine-tuned on Oxford-IIIT Pet (cat breeds only), real gradient-descent training — not a lookup table or a hard-coded rule |
+| **Explainable AI (XAI)** | "Why this breed?" | Grad-CAM computed from the real trained classifier's real gradients — a visualization of contributing regions, never presented as proof or certainty |
+| **Deep Learning — visual embeddings** | "Cats Like This" | A 576-dim feature vector from an ImageNet-pretrained CNN, capturing how a photo *looks*, independent of the breed classifier |
+| **Vector search** | "Cats Like This" | [FAISS](https://github.com/facebookresearch/faiss) exact cosine-similarity search over those embeddings, with SQL-level privacy filtering before results ever reach a response |
+| **Deterministic personalization** | Personality trait scores | A documented, non-ML rules engine over real breed/color signals — no LLM, no randomness; the same photo always produces the same 8 scores |
+| **Generative AI — text** | Stories, profile flavor text, personality interpretation | An LLM (Anthropic), used only for creative *text* — it can never see or change a trait score, a breed label, or a color value |
+| **Generative AI — image** | Portrait Studio | Image-conditioned generation (OpenAI `gpt-image-1`) using the cat's real photo as identity reference, not text-only generation |
+
+Every AI output in the app is honestly labeled as one of three kinds,
+and the three are never allowed to blur together:
+
+- **REAL MODEL OUTPUT** — an actual trained model or deterministic
+  algorithm ran on your actual photo: breed prediction, fur-color
+  clusters, Grad-CAM heatmaps, visual embeddings/similarity scores,
+  and personality trait scores. These numbers change if the photo
+  changes and are reproducible.
+- **AI-GENERATED CREATIVE CONTENT** — an LLM or image model produced
+  flavor text or artwork *conditioned on* the real model output above
+  (breed, colors, archetype), clearly labeled as generated (e.g.
+  "AI-generated artwork"), and never treated as a measurement of
+  anything.
+- **DEMO FALLBACK** — no API key is configured (or a live call
+  failed), so a deterministic, hand-written placeholder is shown
+  instead and explicitly labeled `"_mode": "demo"` / "Offline demo
+  content" in the API response and UI — never silently indistinguishable
+  from a real generation.
+
+As of the last validation pass (Phase 16), the CV/embedding/Grad-CAM/
+personality components above all run for real in this repository and
+were independently re-measured; the two generative-AI providers
+(Anthropic LLM, OpenAI image generation) are fully implemented with
+tested mock/fallback paths, but **live generation was NOT VERIFIED in
+that validation environment** because no API keys were configured
+there — see AI_VALIDATION_REPORT.md for exactly what was and wasn't
+tested, including a known limitation with no dedicated "is this even a
+cat" detection gate.
 
 ## Quick start (local development)
 
