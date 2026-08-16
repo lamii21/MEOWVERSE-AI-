@@ -139,8 +139,10 @@ account's collection, **Favorite** and **Share** work the same way
 (Share marks it public and copies a `/cat/[id]` link, or opens your
 device's native share sheet where available), **Download PNG** exports
 the actual card as an image file, and **Story** jumps to story
-generation. **Generate Wallpaper** is an honest placeholder — disabled
-with a "coming soon" label — pending Phase 14's image generation.
+generation. **Generate Wallpaper** is still an honest placeholder —
+disabled with a "coming soon" label — a distinct, not-yet-built
+feature from the **Portrait Studio** below it, which *does* do real AI
+image generation.
 
 ## Accounts & your cat collection
 
@@ -304,3 +306,39 @@ Regenerating the creative text (owner-only) can never change the
 underlying trait scores or archetype — verified by both the caching
 design and a dedicated test. See ARCHITECTURE.md §25–28 for the scoring
 formula, archetype list, and LLM/fallback design.
+
+## Portrait Studio — personalized AI art, not a generic cat picture
+
+MeowVerse can turn your cat's real reference photo into a beautiful
+artistic portrait across 10 styles (Royal, Magical Guardian, Fantasy
+Wizard, Cosmic, Cozy Café, Storybook, Watercolor, Sticker, Anime,
+Medieval) — using your cat's **actual photo as the primary identity
+reference**, not just a text description like "a British Shorthair
+cat" (which would just generate a generic cat of that breed).
+
+- **Real image-conditioned generation.** When configured, MeowVerse
+  uses OpenAI's `gpt-image-1` image-editing model with your cat's real
+  photo attached alongside the prompt, so the result is grounded in
+  what your cat actually looks like — never a stock image, a
+  placeholder gradient, or a randomly-picked photo pretending to be
+  generated.
+- **A backend-only prompt builder**, never the frontend, assembles
+  every prompt from real signals (breed, fur colors) plus your chosen
+  style — it never invents details the photo doesn't show (no assumed
+  eye color, markings, or fur length), and any optional idea you type
+  in ("Put Luna in a moonlit library...") is sanitized and can never
+  override the identity-preservation rules.
+- **Personality and rarity may shape the *atmosphere*** (a moonlit
+  scene for a "Dreamy Explorer," a more elaborate background for a
+  rarer cat) — but never your cat's actual physical appearance.
+- Every portrait is clearly labeled **"AI-generated artwork,"** never
+  presented as a real photograph, and comes with an honest disclaimer
+  that it's an artistic interpretation, not a claim of perfect
+  likeness.
+- If no image-generation provider is configured, MeowVerse says so
+  plainly — "Portrait generation is currently unavailable" — rather
+  than faking a result. The rest of the app keeps working either way.
+- A cat can collect multiple portraits across styles, download any of
+  them as a PNG, and share one via its own public `/portrait/[id]`
+  page. See ARCHITECTURE.md §29–32 for the full provider architecture,
+  prompt design, identity-preservation strategy, and privacy model.

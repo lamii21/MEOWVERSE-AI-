@@ -10,6 +10,7 @@ from app.repositories.analysis_repository import (
     get_rarity_distribution,
     get_user_stats,
 )
+from app.repositories.portrait_repository import count_distinct_user_styles, count_user_portraits
 from app.repositories.story_repository import count_user_stories, has_story_of_style
 from app.schemas.collection import AchievementOut, BreedDiscoveryOut, CollectionStats, ProgressOut
 from app.schemas.story import StoryStyle
@@ -34,6 +35,8 @@ async def _build_achievement_stats(db: AsyncSession, user_id: uuid.UUID) -> dict
     raw["has_dreamy_story"] = await has_story_of_style(
         db, user_id, StoryStyle.DREAMY_EMOTIONAL.value
     )
+    raw["total_portraits"] = await count_user_portraits(db, user_id)
+    raw["distinct_portrait_styles"] = await count_distinct_user_styles(db, user_id)
     return raw
 
 

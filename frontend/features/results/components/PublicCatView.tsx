@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { GradCamExplanation } from "@/features/explanation/components/GradCamExplanation";
 import { PersonalityCard } from "@/features/personality/components/PersonalityCard";
+import { PortraitStudio } from "@/features/portrait/components/PortraitStudio";
 import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
 
 import { CatCard } from "./CatCard";
@@ -22,6 +23,7 @@ export function PublicCatView({ result }: { result: AnalysisResult }) {
         Discover your own cat
       </Link>
       <PersonalityCard result={result} />
+      <PortraitStudio result={result} />
       <GradCamExplanation result={result} />
       <CatsLikeThis analysisId={result.id} />
     </div>

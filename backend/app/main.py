@@ -8,6 +8,7 @@ from app.api.v1.collection import router as collection_router
 from app.api.v1.explanation import router as explanation_router
 from app.api.v1.health import router as health_router
 from app.api.v1.personality import router as personality_router
+from app.api.v1.portrait import router as portrait_router
 from app.api.v1.similarity import router as similarity_router
 from app.api.v1.stories import router as stories_router
 from app.core.config import get_settings
@@ -45,3 +46,4 @@ app.include_router(collection_router)
 app.include_router(similarity_router)
 app.include_router(explanation_router)
 app.include_router(personality_router)
+app.include_router(portrait_router)

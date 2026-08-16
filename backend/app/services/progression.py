@@ -17,6 +17,10 @@ XP_VALUES: dict[str, int] = {
     "STORY_GENERATED": 25,
     "CAT_SHARED": 15,
     "ACHIEVEMENT_UNLOCKED": 50,
+    # Phase 14: modest by design (spec §37 "do not add excessive XP
+    # rewards") — between CAT_SHARED and STORY_GENERATED, since
+    # generating a portrait is a real but not especially rare action.
+    "PORTRAIT_GENERATED": 20,
 }
 
 # Level N requires xp >= LEVEL_XP_STEP * (N-1)^2 — a quadratic curve,

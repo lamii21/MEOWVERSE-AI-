@@ -726,15 +726,98 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
   exercised the deterministic demo-fallback path, not a live LLM call
   — reported honestly rather than simulated. See PROJECT_STATUS.md.
 
-## Phase 14 — Creative Generation
-- ⬜ `ImageGenerationProvider` interface + fallback UI
+## Phase 14 — MeowVerse AI Cat Portrait Studio: Personalized AI Art Generation ✅
+- ✅ `ImageGenerationProvider` extended (not replaced — Phase 13's ABC
+  scaffold gained a new `generate_portrait` method) with a real
+  `OpenAIImageGenerationProvider` using `gpt-image-1`'s `images.edit`
+  endpoint, verified against the installed `openai` 3.1.0 SDK's real
+  method signature before writing any code (not assumed). Falls back
+  to an honest `NullImageGenerationProvider` when
+  `IMAGE_GENERATION_PROVIDER != "openai"` or no key is configured —
+  never a fake, placeholder, or stock image. See ARCHITECTURE.md §29.
+- ✅ The real, original source photo is always the primary identity
+  reference (`input_fidelity="high"`, spec §6/§7) — never Grad-CAM,
+  never the similarity embedding, never a previous portrait. A
+  backend-only `PortraitPromptBuilder` (`app/ai/portrait_prompt.py`)
+  assembles a deterministic prompt from real breed/color signals, the
+  selected style, an optional archetype-driven atmosphere line
+  (personality theme only, never physical identity), and a
+  rarity-driven environment line (background/framing only) — the
+  frontend only ever picks a style id and a short optional idea, never
+  prompt text itself.
+- ✅ 10 controlled, polished styles (Royal, Magical Guardian, Fantasy
+  Wizard, Cosmic, Cozy Café, Storybook, Watercolor, Sticker, Anime,
+  Medieval), each a fixed scene-direction string, never LLM-invented.
+- ✅ User customization (max 120 chars) sanitized (control chars
+  stripped, whitespace collapsed, truncated) and structurally confined
+  to its own labeled "optional creative idea" section — cannot reach
+  or override the identity-preservation/system-rules sections (spec
+  §16, verified by a dedicated prompt-injection test).
+- ✅ Never hallucinates unobserved features (spec §12) — no eye color,
+  markings, or fur length is ever asserted as fact (this codebase's CV
+  pipeline doesn't extract them); the prompt only ever instructs the
+  model to preserve whatever it observes in the attached reference
+  photo.
+- ✅ Owner-only generation (spec §9) — stricter than every other
+  Phase 9-13 endpoint: there is no "public OR owned" path for `POST
+  .../portraits` at all, since a stranger viewing a public cat must
+  never trigger a real, cost-bearing generation against it. `GET` (list
+  and single-portrait) keeps the familiar public-or-owned rule.
+- ✅ `cat_portraits` (new table): multiple portraits per cat, never
+  overwritten; failed attempts persisted with an honest `error_code`,
+  never silently discarded; soft duplicate-generation dedup via a
+  `generation_identity_hash` (reuses an existing succeeded result
+  unless "Generate Again" explicitly forces a new one); every generated
+  image re-validated (format/dimensions/size) before being trusted,
+  never a provider response accepted blindly.
+- ✅ A stricter, generation-specific server-side rate limit (5/min,
+  reused `RateLimiter` abstraction, own key prefix) — never relies on
+  frontend button disabling.
+- ✅ `PortraitStudio`/`PortraitCard`/`StyleSelector`/`BeforeAfterViewer`
+  frontend, wired into the same three places Phase 11-13's
+  similarity/Grad-CAM/personality sections are, plus a new public
+  `/portrait/[id]` share page. Every card carries an explicit
+  "AI-generated artwork" label and a not-a-photograph disclaimer —
+  never presented as a real photo, never claiming perfect identity
+  preservation.
+- ✅ Two new gamification achievements ("First Portrait," "Style
+  Collector" — 5 distinct styles), reusing the existing idempotent
+  event-log/XP architecture, modest XP (20, between Story and Share).
+- ✅ Backend: 380/380 tests (was 312) — including 34 deterministic
+  prompt-builder tests (identity signals, no-hallucination, style/
+  personality/rarity separation, sanitization), 11 mock-provider tests
+  (every failure mode: timeout, rate limit, content rejection, invalid
+  output, provider unavailable, malformed response, storage failure,
+  duplicate-reuse, force-new), and 23 API/ownership/privacy/rate-limit
+  tests — ruff clean. Frontend: 150/150 tests (was 124, including a
+  26-test backfill for this phase's own new components), build/lint
+  clean.
+- ✅ Real, live browser E2E against real dev servers with a real Bengal
+  photo: register → analyze → Portrait Studio renders 10 styles →
+  select Cosmic, type a custom idea → Generate → the app's real,
+  unconfigured environment genuinely returns the honest "Portrait
+  generation is currently unavailable" state (never a fake image) →
+  confirmed the rest of the page (Cat Personality, Grad-CAM) keeps
+  working unaffected → verified visually at 375px + reduced motion,
+  zero new console errors.
+- ⚠️ No real image-generation provider key is configured in this dev
+  environment (same as Anthropic in every prior phase), so a live
+  `gpt-image-1` generation was not performed. The "succeeded" code
+  path (storage, sharing, multiple portraits, download, public page,
+  gamification, dedup/"Generate Again") was instead verified thoroughly
+  via mocked backend tests and mocked frontend component tests, not a
+  live end-to-end image. Reported honestly rather than simulated — see
+  PROJECT_STATUS.md.
 - ✅ Cat Card (image, name, breed, rarity, magic power, colors; download
      PNG, share, copy link) — built early, in Phase 8, as the "MAGICAL
      EXPERIENCE & CAT CARD" phase; still missing here: a QR code on the
      card, and an actual `mood` field/signal (neither exists yet — the
      Phase 8 card omits mood rather than fabricate it)
-- ⬜ Wallpaper / avatar / sticker generation (the Cat Card already has a
-     "Generate Wallpaper" placeholder button wired up and ready for this)
+- ⬜ Wallpaper / avatar / sticker generation — a distinct, still-unbuilt
+     feature from the Portrait Studio above (the Cat Card's "Generate
+     Wallpaper" placeholder button remains disabled); `generate_wallpaper`/
+     `generate_avatar` remain deliberately unimplemented placeholders on
+     `ImageGenerationProvider`, not repurposed into portrait generation.
 
 ## Phase 15 — Testing
 - ⬜ Backend: Pytest unit + integration + pipeline + API tests
@@ -762,9 +845,10 @@ as of Phase 9: "save + revisit history" was the one outstanding piece
 (Phase 8's "Save" only bookmarked locally, with no page to browse
 those bookmarks) and Phase 9 delivered the real, authenticated version
 — an account, a persistent per-user collection, and real history.
-Similarity search, Grad-CAM, the personality engine, and (most)
-creative generation remain explicitly post-MVP (Phases 11–14);
-collection/achievements got their
+Similarity search, Grad-CAM, the personality engine, and the AI
+portrait studio remain explicitly post-MVP (Phases 11–14); wallpaper/
+avatar/sticker generation specifically remains not yet built.
+Collection/achievements got their
 first pass alongside Phase 9 (since the spec bundled a basic persistent
 collection into the same ask) and their full "Cat Universe" treatment
 — gamification, XP/levels, breed discovery, the constellation map —
@@ -781,9 +865,18 @@ in Phase 10.
   couldn't catch (e.g. actual model output failing schema validation in
   a way the tests didn't anticipate — the retry-then-demo-fallback path
   exists exactly for this).
-- Image generation (Phase 14) still depends on a provider abstraction
-  with only a working `NullProvider` fallback — `ImageGenerationProvider`
-  is still a null stub.
+- Portrait generation (Phase 14) has a real, implemented
+  `OpenAIImageGenerationProvider` — no longer a null stub — but no
+  `IMAGE_GENERATION_API_KEY`/`OPENAI_API_KEY` is configured on this dev
+  machine, so it has never actually been exercised against a live
+  `gpt-image-1` call; every request in this environment genuinely
+  returns the honest `NullImageGenerationProvider` "unavailable" state.
+  The real provider code is verified against the installed `openai`
+  SDK's actual method signatures and error hierarchy (not guessed) and
+  covered by 11 mocked-provider tests, but the first live call should
+  still be watched for anything the mocks couldn't catch. Wallpaper/
+  avatar generation (a separate, still-unbuilt feature) remains a null
+  stub.
 - No `ANTHROPIC_API_KEY` is configured on this dev machine (unchanged
   since Phase 6) — Phase 13's personality interpretation has been
   fully verified against the deterministic demo-fallback path (mocked

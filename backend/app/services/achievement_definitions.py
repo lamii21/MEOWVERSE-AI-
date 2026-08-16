@@ -101,6 +101,22 @@ ACHIEVEMENTS: list[AchievementDefinition] = [
         is_unlocked=lambda stats: stats["favorites_count"] >= 1,
         progress=lambda stats: (min(stats["favorites_count"], 1), 1),
     ),
+    AchievementDefinition(
+        key="first_portrait",
+        emoji="🎨",
+        label="First Portrait",
+        description="Create your first AI cat portrait.",
+        is_unlocked=lambda stats: stats["total_portraits"] >= 1,
+        progress=lambda stats: (min(stats["total_portraits"], 1), 1),
+    ),
+    AchievementDefinition(
+        key="style_collector",
+        emoji="🖼️",
+        label="Style Collector",
+        description="Create portraits in 5 different styles.",
+        is_unlocked=lambda stats: stats["distinct_portrait_styles"] >= 5,
+        progress=lambda stats: (min(stats["distinct_portrait_styles"], 5), 5),
+    ),
 ]
 
 ACHIEVEMENTS_BY_KEY = {a.key: a for a in ACHIEVEMENTS}

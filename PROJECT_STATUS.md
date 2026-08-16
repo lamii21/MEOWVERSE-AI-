@@ -4,10 +4,12 @@ _Last updated: 2026-08-16_
 
 ## Current Phase
 
-**Phase 13 — MeowVerse Cat Personality Engine: Structured, Cute &
-Honest AI Personality: complete and verified end-to-end.** Phase 14
-(Creative Generation / `ImageGenerationProvider`) is next, not yet
-started.
+**Phase 14 — MeowVerse AI Cat Portrait Studio: Personalized AI Art
+Generation: complete and verified end-to-end.** Phase 15 (formal
+Testing pass) is next, not yet started. See "Notes for Future
+Sessions" below for a self-correction made at the start of this phase:
+Phase 13's report incorrectly claimed no frontend tests existed
+anywhere in the repo.
 
 ## What Exists
 
@@ -194,6 +196,110 @@ started.
     Phase 13 itself didn't add tests for its *own* two new components
     (`PersonalityCard`, `TraitBar`), breaking the pattern every other
     phase followed. Fixed retroactively — see Phase 14's entry below.
+
+## What Exists (Phase 14 additions)
+
+- `backend/` —
+  - `app/ai/providers.py` — `ImageGenerationProvider` (a Phase-13-era
+    scaffold) gained one new abstract method, `generate_portrait`, plus
+    `ImageGenerationError` (a closed set of `PortraitErrorCode`s) and
+    `PortraitGenerationResult`. `generate_wallpaper`/`generate_avatar`
+    remain deliberately unimplemented — a separate, not-yet-built
+    feature this phase doesn't repurpose.
+  - `app/ai/openai_image_provider.py` — `OpenAIImageGenerationProvider`:
+    real `gpt-image-1` image-conditioned generation via
+    `images.edit(image=..., prompt=..., input_fidelity="high", ...)`,
+    verified against the installed `openai` 3.1.0 SDK's actual method
+    signature and exception hierarchy before writing any code (not
+    assumed). `openai==3.1.0` added to `requirements.txt` and
+    installed.
+  - `app/ai/portrait_prompt.py` — the backend-only, deterministic
+    `PortraitPromptBuilder` (`PROMPT_VERSION = "1.0"`): identity
+    preservation (always present, never invents unobserved features),
+    known-signals (breed/colors, only when real), style/environment/
+    atmosphere (10 styles, rarity, optional Phase 13 archetype), and a
+    sanitized, structurally-isolated optional user customization
+    section.
+  - `app/schemas/portrait.py` — `PortraitStyle` (10-value enum),
+    `PORTRAIT_STYLE_LABELS`, `PortraitGenerateRequest` (style +
+    ≤120-char customization + `force_new`), `PortraitOut` (incl.
+    `reused`, `owned`, `gamification`).
+  - `app/models/portrait.py` — `CatPortraitModel` (`cat_portraits`):
+    no unique constraint (an explicit "Generate Again" must allow a
+    real duplicate); a `generation_identity_hash` + composite index
+    backs the soft dedup lookup instead.
+  - `app/repositories/portrait_repository.py`,
+    `app/services/portrait_service.py` — the full orchestration:
+    resolve+authorize (owner-only, spec §9) → dedup lookup → build
+    prompt → load the real original photo (never Grad-CAM, never the
+    similarity embedding, never a previous portrait) → call the
+    provider → re-validate the returned image (format/dimensions/size,
+    never trusted blindly) → store → persist success or an honest
+    failure (never silently discarded).
+  - `app/api/v1/portrait.py` — `GET
+    /api/v1/analyses/{id}/portraits`, `POST` (owner-only, its own
+    stricter rate limit, CSRF-protected), `GET
+    /api/v1/portraits/{id}`, `POST .../share`, `POST .../unshare`.
+  - `app/core/rate_limit.py` — new `enforce_portrait_rate_limit`
+    (default 5/min, own key prefix), reusing the existing
+    `RateLimiter` abstraction.
+  - `app/services/progression.py`, `achievement_definitions.py`,
+    `collection_service.py` — `PORTRAIT_GENERATED` XP event (20,
+    modest by design), two new achievements ("First Portrait," "Style
+    Collector" — 5 distinct styles), backed by real
+    `portrait_repository` count queries.
+  - Migration `198e1f71f53e` — adds `cat_portraits` only, no changes
+    to any existing table. Verified via a real upgrade → downgrade →
+    upgrade cycle.
+  - Tests: `test_portrait_prompt.py` (34 tests — determinism, identity
+    signals, no-hallucination, style/personality/rarity separation,
+    sanitization/prompt-injection resistance), `test_portrait_provider.py`
+    (11 tests — every provider failure mode, dedup, force-new, failed-
+    generation persistence, using a real DB row via the HTTP client
+    plus a mocked provider), `test_portrait.py` (23 tests — the honest
+    unavailable path against this environment's real, unconfigured
+    provider; ownership; multiple portraits; sharing/privacy; email
+    never leaked; gamification; the stricter rate limit's real 429 on
+    the 6th request). **380/380 backend tests passing** (was 312),
+    ruff clean.
+- `frontend/` —
+  - `types/portrait.ts`, `services/portrait.ts` — typed client;
+    `PORTRAIT_STYLE_OPTIONS` mirrors the backend's style metadata
+    (UI-facing only — the frontend never constructs prompt text).
+  - `features/portrait/components/StyleSelector.tsx` — accessible
+    10-style radiogroup, same pattern as Grad-CAM's view switcher and
+    the collection page's rarity filter.
+  - `features/portrait/components/PortraitReveal.tsx` — playful,
+    indeterminate loading sequence (spec §18/§19: no fake percentages),
+    reduced-motion aware.
+  - `features/portrait/components/BeforeAfterViewer.tsx` — a simple
+    Original/AI Portrait toggle (spec §31: "do not make the UI overly
+    complicated" — a two-way switcher, not a drag slider).
+  - `features/portrait/components/PortraitCard.tsx` — the collectible
+    result card: always-visible "AI-generated artwork" label, reuses
+    `CatCard`'s exact PNG export technique and the existing `/share`
+    endpoint (no second export/share pipeline), Generate Again.
+  - `features/portrait/components/PortraitStudio.tsx` — the
+    orchestrator: auto-loads existing portraits (like "Cats Like
+    This"), but generation itself is always a manually-triggered
+    action (like Grad-CAM/Story) since a real provider call is
+    expensive; maps every `PortraitErrorCode` to a distinct, friendly,
+    honest message.
+  - `app/portrait/[id]/page.tsx`,
+    `features/portrait/components/PublicPortraitView.tsx` — the public
+    share page; only shows cat-name/breed context when the *parent
+    analysis* is independently public too (a shared portrait never
+    implies its source cat is shared).
+  - Wired into the same three places Phase 11-13's similarity/Grad-CAM/
+    personality sections are: the analyze results page, the public
+    `/cat/[id]` page, and the owner's `/collection/[id]` page.
+  - 3 new test files (`StyleSelector.test.tsx`, `PortraitCard.test.tsx`,
+    `PortraitStudio.test.tsx`, 26 tests) plus a 2-file, 18-test
+    backfill for Phase 13's previously-untested components
+    (`PersonalityCard.test.tsx`, `TraitBar.test.tsx`) — corrective work
+    done at the very start of this phase, see "Notes for Future
+    Sessions." **150/150 frontend tests passing** (was 106 at the true
+    start of this phase), lint/build clean.
 
 ## Real Results (Phase 12)
 
@@ -393,16 +499,69 @@ script's reduced-motion step: zero console errors, confirmed twice
   (mocked-provider unit tests + this real browser run), but a live
   Anthropic personality generation call has not been.
 
+## Real Results (Phase 14)
+
+- **Both suites green**: 380/380 backend (was 312, including 68 new
+  portrait tests), 150/150 frontend (was 124, including this phase's
+  own 26 new tests plus the 18-test Phase 13 backfill). Ruff/lint/build
+  all clean.
+- **A real provider implementation, verified against the real SDK,
+  never exercised live in this environment**: `OpenAIImageGenerationProvider`
+  is genuine code against `openai` 3.1.0's actual, introspected
+  `images.edit` signature and exception hierarchy — but no
+  `IMAGE_GENERATION_API_KEY`/`OPENAI_API_KEY` is configured on this dev
+  machine (same honest gap as Anthropic since Phase 6), so a live
+  `gpt-image-1` call was never performed. Every "succeeded" code
+  path — storage, output re-validation, sharing, multiple portraits,
+  download, the public page, gamification, dedup/"Generate Again" — was
+  instead verified via 11 mocked-provider backend tests and mocked
+  frontend component tests, which is a real and appropriate way to
+  verify that code without a key, but is explicitly **not** the same
+  as a live end-to-end image having been produced.
+- **The one thing that *was* verified fully live, end to end**: the
+  honest "no provider configured" path — via a real Playwright browser
+  run (register → analyze a real Bengal photo → open Portrait Studio →
+  select Cosmic, type a custom idea → Generate) the app's real backend
+  genuinely returned `status: "failed"`, `error_code:
+  "provider_unavailable"`, and the UI rendered the exact honest
+  message ("Portrait generation is currently unavailable — no
+  image-generation provider is configured in this environment.") —
+  never a fake or placeholder image. The rest of the page (Cat
+  Personality, Grad-CAM) kept rendering normally alongside it,
+  confirming the unavailable state doesn't break anything else.
+  Verified again at a 375px mobile viewport with
+  `prefers-reduced-motion: reduce`, zero new console errors.
+- **Performance, measured against the live dev server for every code
+  path this environment can actually reach** (warm process, real
+  Postgres, real analysis row):
+  - `POST /api/v1/analyses/{id}/portraits`, the honest unavailable
+    fast-fail path (pending row inserted, immediately marked failed,
+    two real DB writes): mean **268ms** over 5 requests (250–290ms).
+  - `GET /api/v1/analyses/{id}/portraits` (list): mean **237ms** over
+    3 requests.
+  - The 6th generation request within a minute genuinely returned
+    **HTTP 429** — the stricter, portrait-specific rate limit (5/min)
+    confirmed live, not just in a unit test.
+  - Pure prompt-building latency (`build_prompt()`, no I/O): mean
+    **0.0099ms**, max 0.2486ms over 1000 calls — confirms the
+    ~250-290ms endpoint latency above is entirely DB/HTTP overhead in
+    this dev environment, not the prompt construction itself.
+  - **Real `gpt-image-1` provider generation latency was not measured**
+    — there is no live call to time. Not fabricated; reported as
+    unmeasured.
+
 ## What Does Not Exist Yet
 
-Image generation (Phase 14), advanced analytics, a mobile app, a
-social feed, chat, OAuth login, a formal Grad-CAM faithfulness
-*benchmark* (a small sanity check was performed and is documented
-above — a rigorous benchmark with a held-out evaluation protocol is a
-different, larger undertaking not attempted), pgvector, deleting an
-analysis, live-verified Anthropic personality generation (see above).
-See ROADMAP.md
-Phases 14–18.
+Advanced analytics, a mobile app, a social feed, chat, OAuth login, a
+formal Grad-CAM faithfulness *benchmark* (a small sanity check was
+performed and is documented above — a rigorous benchmark with a
+held-out evaluation protocol is a different, larger undertaking not
+attempted), pgvector, deleting an analysis, live-verified Anthropic
+personality generation (see above), live-verified `gpt-image-1`
+portrait generation (see above), wallpaper/avatar/sticker generation
+(a distinct, still-unbuilt feature — the Cat Card's "Generate
+Wallpaper" button remains an honest disabled placeholder). See
+ROADMAP.md Phase 15–18.
 
 ## Known Limitations / Honest Gaps
 
@@ -448,16 +607,45 @@ Phases 14–18.
   ML-less Docker image, `vitest.config.ts`'s `pool: "threads"`, single
   global FAISS index with SQL-enforced privacy) are unchanged from
   Phase 9–12.
+- **No live `gpt-image-1` call has been performed** — same honest gap
+  as Anthropic, now applying to the image-generation provider too. The
+  provider code is real and verified against the SDK's actual surface,
+  covered by 11 mocked-failure-mode tests, but the first live call
+  should still be watched for anything the mocks couldn't catch (e.g.
+  a real response shape the mocks didn't anticipate).
+- **The public `/portrait/[id]` page doesn't show the Phase 13
+  personality archetype**, even when both the portrait and the
+  personality are public — a deliberate scope decision (matching
+  `/story/[id]`'s similarly narrow, single-purpose share page rather
+  than cross-embedding every other feature), not an oversight. Could
+  be added later with one more public-safe fetch if wanted.
+- **No "N portraits" badge on the collection grid card** — portraits
+  are fully manageable from the owner's `/collection/[id]` detail page
+  (where `PortraitStudio` is mounted, satisfying spec §36's "integrate
+  into the Cat Collection, do not build a separate system"), but the
+  grid/list view itself doesn't surface a portrait count. A scope trim
+  for this phase's size, not a missing capability — the underlying
+  batched-count repository query pattern already exists for stories
+  and could be mirrored later.
+- **"Save" is not a separate portrait action** — spec §32 listed
+  Save/Download/Share/Generate Again, but unlike an anonymous/guest
+  analysis, portrait generation always requires authentication already
+  (spec §9), so every portrait is already persisted to the owner's
+  account the moment it's created; a redundant "Save" button with
+  nothing further to do would have been decorative, not functional, so
+  it was intentionally omitted.
 
 ## Next Steps
 
-Begin Phase 14: Creative Generation (`ImageGenerationProvider`
-interface + fallback UI, wiring up the Cat Card's existing "Generate
-Wallpaper" placeholder button) — the next un-started item in
-ROADMAP.md. Keep extending the existing 22-file `vitest` suite for any
-new component going forward — the gap worth avoiding is a phase
-skipping its own tests (as Phase 13 briefly did), not a missing test
-runner.
+Begin Phase 15: Testing (a formal, dedicated test-hardening pass) —
+the next un-started item in ROADMAP.md. Keep extending the existing
+`vitest`/`pytest` suites for any new component/endpoint going
+forward — the gap worth avoiding is a phase skipping its own tests (as
+Phase 13 briefly did), not a missing test runner. If a real
+`ANTHROPIC_API_KEY` or `IMAGE_GENERATION_API_KEY` ever becomes
+available in this environment, a live-call smoke test for both
+providers would be a high-value, currently-missing piece of
+verification.
 
 ## Notes for Future Sessions
 
@@ -519,3 +707,38 @@ runner.
   checking early (via an isolated re-run of the failing file alone)
   whenever a full-suite run fails a test a phase's own new files don't
   touch, rather than assuming the new code caused it.
+- **Always re-verify a claim like "X doesn't exist in this repo" with a
+  direct, working search before writing it into a report** — Phase 13
+  claimed zero frontend tests existed anywhere, based on a `Glob` call
+  that (for reasons not fully diagnosed) returned no results even
+  though `git ls-files | grep test` immediately found 22 real,
+  passing test files going back to the initial commit. The fix wasn't
+  just correcting the doc — it was cross-checking with a second,
+  different tool (`git ls-files`) before trusting a negative search
+  result enough to state it as fact. A negative result from one tool
+  is weaker evidence than a positive result; worth a second check
+  before it becomes a permanent claim in a report or a doc.
+- **Extending an existing ABC with one new method beats standing up a
+  parallel provider hierarchy** — `ImageGenerationProvider` already
+  existed (Phase 13, unused) with `generate_wallpaper`/`generate_avatar`
+  placeholders for a different feature; adding `generate_portrait`
+  alongside them (rather than creating a second, portrait-specific
+  provider interface) kept `get_image_generation_provider()`'s factory
+  shape, the `NullProvider` fallback pattern, and the "check
+  `is_available` before touching anything real" convention all
+  consistent with `get_llm_provider()` — no new architecture to learn.
+- **A prompt-injection test is cheap to write and catches a real class
+  of bug**: appending untrusted user text to a prompt string and
+  asserting *where* it can and can't land (via a fixed section order —
+  identity/known-signals/style always come first, user text always
+  last) is easy to verify mechanically (`prompt.split("STYLE:")[0]`
+  must never contain the injected text) without needing an LLM in the
+  loop at all, since the guarantee lives in Python string
+  concatenation order, not in hoping the model ignores an injected
+  instruction.
+- Previously noted lessons (DB-backed sessions over JWT, ownership-
+  scoped queries as the security boundary, the idempotent-event-log
+  pattern, content-hash deduplication, model versioning via a
+  cache-key unique constraint, the two-table cheap-core/expensive-extra
+  caching split, schema-shape-as-guarantee over prompt instructions,
+  shared-dev-corpus test flakiness) all still apply.

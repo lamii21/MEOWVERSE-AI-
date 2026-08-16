@@ -4,6 +4,7 @@ from app.models.collection_event import CollectionEventModel
 from app.models.embedding import CatEmbeddingModel
 from app.models.explanation import CatExplanationModel
 from app.models.personality import CatPersonalityInterpretationModel, CatPersonalityModel
+from app.models.portrait import CatPortraitModel
 from app.models.progress import UserProgressModel
 from app.models.session import SessionModel
 from app.models.story import StoryModel
@@ -15,6 +16,7 @@ __all__ = [
     "CatExplanationModel",
     "CatPersonalityInterpretationModel",
     "CatPersonalityModel",
+    "CatPortraitModel",
     "CollectionEventModel",
     "SessionModel",
     "StoryModel",

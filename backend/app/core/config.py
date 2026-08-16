@@ -41,6 +41,22 @@ class Settings(BaseSettings):
 
     image_generation_provider: str = "none"
     image_generation_api_key: str | None = None
+    # --- AI Cat Portrait Studio (Phase 14) ---
+    # Pinned to a specific, real, current OpenAI image model that
+    # supports image-conditioned edits (a reference photo + a prompt) —
+    # not a guess. Override via .env if a different model is preferred;
+    # check https://platform.openai.com/docs/models before changing it.
+    image_generation_model: str = "gpt-image-1"
+    image_generation_timeout_seconds: float = 60.0
+    # Server-side ceilings (spec §25 "cost control") — never exposed as
+    # raw provider parameters to the frontend, which only ever picks a
+    # style + optional short customization string.
+    portrait_output_size: str = "1024x1024"
+    portrait_max_bytes: int = 15 * 1024 * 1024
+    # Tighter than the general AI-endpoint limit (rate_limit_per_minute)
+    # — a real image generation call is meaningfully more expensive than
+    # a text completion. See app/core/rate_limit.py.
+    portrait_generation_rate_limit_per_minute: int = 5
 
     cors_origins: list[str] = ["http://localhost:3000"]
 

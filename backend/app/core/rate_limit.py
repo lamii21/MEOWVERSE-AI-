@@ -68,6 +68,27 @@ async def enforce_rate_limit(request: Request) -> None:
         )
 
 
+async def enforce_portrait_rate_limit(request: Request) -> None:
+    """Applied to POST /api/v1/analyses/{id}/portraits specifically
+    (Phase 14 spec §24) — a real image generation call is meaningfully
+    more expensive than the text-completion endpoints `enforce_rate_limit`
+    covers, so it gets its own, tighter budget and its own key prefix
+    (a burst of portrait generations from one IP doesn't also exhaust
+    that IP's analyze/story budget, or vice versa). Enforced server-side
+    only — the frontend disabling its Generate button is UX, not the
+    actual control (spec §24: "do not rely on frontend button
+    disabling").
+    """
+    settings = get_settings()
+    if not _limiter.check(
+        f"portrait:{_client_id(request)}", settings.portrait_generation_rate_limit_per_minute
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many portraits requested — please slow down and try again in a moment.",
+        )
+
+
 async def enforce_auth_rate_limit(request: Request) -> None:
     """Applied to register/login specifically — a tighter limit than
     the general API, since brute-forcing passwords / spamming account

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { HowMeowVerseKnows } from "@/features/analyze/components/HowMeowVerseKnows";
 import { GradCamExplanation } from "@/features/explanation/components/GradCamExplanation";
 import { PersonalityCard } from "@/features/personality/components/PersonalityCard";
+import { PortraitStudio } from "@/features/portrait/components/PortraitStudio";
 import { CatsLikeThis } from "@/features/similarity/components/CatsLikeThis";
 import { StorySection } from "@/features/story/components/StorySection";
 
@@ -106,6 +107,7 @@ export function ResultExperience({
           </div>
 
           <PersonalityCard result={result} />
+          <PortraitStudio result={result} catImageUrl={catImageUrl} />
           <GradCamExplanation result={result} catImageUrl={catImageUrl} />
           <CatsLikeThis analysisId={result.id} />
         </>
