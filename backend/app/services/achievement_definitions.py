@@ -117,6 +117,38 @@ ACHIEVEMENTS: list[AchievementDefinition] = [
         is_unlocked=lambda stats: stats["distinct_portrait_styles"] >= 5,
         progress=lambda stats: (min(stats["distinct_portrait_styles"], 5), 5),
     ),
+    AchievementDefinition(
+        key="first_explorer",
+        emoji="🌎",
+        label="First Explorer",
+        description="Visit your first public cat.",
+        is_unlocked=lambda stats: stats["cats_explored"] >= 1,
+        progress=lambda stats: (min(stats["cats_explored"], 1), 1),
+    ),
+    AchievementDefinition(
+        key="curious_whiskers",
+        emoji="🔎",
+        label="Curious Whiskers",
+        description="Explore 10 public cats.",
+        is_unlocked=lambda stats: stats["cats_explored"] >= 10,
+        progress=lambda stats: (min(stats["cats_explored"], 10), 10),
+    ),
+    AchievementDefinition(
+        key="breed_seeker",
+        emoji="🧬",
+        label="Breed Seeker",
+        description="Discover examples from 5 breeds.",
+        is_unlocked=lambda stats: stats["distinct_breeds_explored"] >= 5,
+        progress=lambda stats: (min(stats["distinct_breeds_explored"], 5), 5),
+    ),
+    AchievementDefinition(
+        key="color_hunter",
+        emoji="🌈",
+        label="Color Hunter",
+        description="Explore 5 fur color groups.",
+        is_unlocked=lambda stats: stats["distinct_colors_explored"] >= 5,
+        progress=lambda stats: (min(stats["distinct_colors_explored"], 5), 5),
+    ),
 ]
 
 ACHIEVEMENTS_BY_KEY = {a.key: a for a in ACHIEVEMENTS}

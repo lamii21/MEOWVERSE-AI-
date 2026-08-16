@@ -144,3 +144,26 @@ async def count_distinct_user_styles(db: AsyncSession, user_id: uuid.UUID) -> in
         CatPortraitModel.user_id == user_id, CatPortraitModel.status == "succeeded"
     )
     return (await db.execute(stmt)).scalar_one()
+
+
+async def get_analysis_ids_with_public_portraits(
+    db: AsyncSession, analysis_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Batched, N+1-avoiding lookup (same shape as
+    `story_repository.get_analysis_ids_with_public_stories`) for the
+    `/explore` discovery card's "has AI portrait" indicator — succeeded
+    AND public only, so a private or failed portrait is never implied
+    to exist via a public discovery card (Phase 15 spec §5/§19)."""
+    if not analysis_ids:
+        return set()
+    stmt = (
+        select(CatPortraitModel.analysis_id)
+        .where(
+            CatPortraitModel.analysis_id.in_(analysis_ids),
+            CatPortraitModel.is_public.is_(True),
+            CatPortraitModel.status == "succeeded",
+        )
+        .distinct()
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)

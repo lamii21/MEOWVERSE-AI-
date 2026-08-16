@@ -16,7 +16,7 @@ This README is intentionally minimal during early development. See:
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) — what's done, what's next
 
 A full README (features, screenshots, API reference, deployment guide)
-is written in Phase 17 once the product is functional end to end.
+is written in Phase 18 once the product is functional end to end.
 
 ## Quick start (local development)
 
@@ -171,10 +171,12 @@ account.
 - **`/profile`** — your level, XP bar, stats, favorite cat, and
   achievements, all computed from your real saved cats — never
   fabricated.
-- **`/achievements`** — 9 milestones (First Paw, Cozy Collector,
+- **`/achievements`** — 15 milestones (First Paw, Cozy Collector,
   Collector, Rare Hunter, Royal Encounter, Color Collector, Storyteller,
-  Dream Keeper, Cat Home), each unlocked by a real action, with a
-  progress bar toward the locked ones.
+  Dream Keeper, Cat Home, First Portrait, Style Collector, First
+  Explorer, Curious Whiskers, Breed Seeker, Color Hunter), each
+  unlocked by a real action, with a progress bar toward the locked
+  ones.
 - A saved cat is **private by default**; only clicking **Share**
   makes that specific cat viewable at a public `/cat/[id]` link, and
   only its intended public fields are ever exposed there — never your
@@ -342,3 +344,38 @@ cat" (which would just generate a generic cat of that breed).
   them as a PNG, and share one via its own public `/portrait/[id]`
   page. See ARCHITECTURE.md §29–32 for the full provider architecture,
   prompt design, identity-preservation strategy, and privacy model.
+
+## Cat Universe — public discovery, privacy-first
+
+`/explore` is MeowVerse's public discovery area — a small, coherent
+"Cat Universe" for browsing cats their owners have explicitly made
+public, not a general social network. There are no comments, no direct
+messages, no follower system, and no public "likes" — discovery stays
+about the cats.
+
+- **A cat appears here only if its owner explicitly shared it** — the
+  exact same public/private model every other page in MeowVerse already
+  uses, enforced at the database query level (a private cat is
+  filtered out in SQL, never fetched and then hidden after the fact).
+  Nothing about a private cat — including its existence — is ever
+  visible through search, filters, featured selection, or "visually
+  similar" results.
+- **Search, filter, and sort** by name, breed, rarity, [personality
+  archetype](#-cat-personality--an-ai-inspired-personality-honestly-labeled),
+  and fur color, plus whether a cat has a public story or AI portrait.
+  Sorting includes a genuinely new, real metric — **"Most Discovered"**
+  — the actual count of signed-in visitors who have opened that cat's
+  page; MeowVerse doesn't invent a "most liked" or "most shared" number
+  that isn't really tracked anywhere.
+- **Featured Cats** uses a documented, deterministic formula (rarity +
+  having a public portrait/story + real analysis quality) — never a
+  random pick, so the same cat won't reshuffle on every page load.
+- **Breed, Personality, and Color Explorers** reuse the exact same
+  breed catalog, personality archetypes, and color analysis the rest
+  of the app already has — never a second, parallel classification
+  system — merged with real counts of *public* cats only.
+- Opening someone else's public cat for the first time is a small, real
+  discovery moment (a little XP, and achievements like "First Explorer"
+  and "Curious Whiskers") — reusing the exact same anti-farming event
+  log every other MeowVerse achievement already uses, so revisiting the
+  same cat never re-awards anything.

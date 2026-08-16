@@ -140,9 +140,17 @@ async def get_cat(
     """
     row = await get_public_analysis(db, analysis_id)
     if row is not None:
-        return analysis_row_to_result(
+        result = analysis_row_to_result(
             row, viewer_is_owner=False, has_story=await has_any_story(db, row.id)
         )
+        # Phase 15 spec §25/§26: a signed-in visitor opening someone
+        # else's public cat is a real "discovery" moment — idempotent
+        # per analysis_id (same anti-farming mechanism as every other
+        # event), so revisiting the same cat never re-grants XP. Guests
+        # and owners viewing their own cat never trigger this.
+        if user is not None and user.id != row.user_id:
+            result.gamification = await process_event(db, user.id, "CAT_EXPLORED", row.id)
+        return result
 
     if user is not None:
         row = await get_owned_analysis(db, analysis_id, user.id)

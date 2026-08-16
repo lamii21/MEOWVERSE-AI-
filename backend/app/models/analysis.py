@@ -39,6 +39,16 @@ class CatAnalysisModel(Base):
     __table_args__ = (
         Index("ix_cat_analyses_user_id_created_at", "user_id", "created_at"),
         Index("ix_cat_analyses_user_id_rarity", "user_id", "rarity"),
+        # Phase 15 — every /explore query filters `is_public = true`
+        # first; each index below leads with that column so it also
+        # backs the plain "is this row public" filter, then adds the
+        # one extra column each query actually sorts/filters by next:
+        Index("ix_cat_analyses_is_public_created_at", "is_public", "created_at"),
+        # ^ the default "newest" listing and the base filter itself.
+        Index("ix_cat_analyses_is_public_rarity", "is_public", "rarity"),
+        # ^ the rarity filter and the "rarity" sort.
+        Index("ix_cat_analyses_is_public_breed_label", "is_public", "breed_label"),
+        # ^ the breed filter and Breed Explorer's per-breed counts.
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)

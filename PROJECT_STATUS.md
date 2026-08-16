@@ -4,12 +4,11 @@ _Last updated: 2026-08-16_
 
 ## Current Phase
 
-**Phase 14 — MeowVerse AI Cat Portrait Studio: Personalized AI Art
-Generation: complete and verified end-to-end.** Phase 15 (formal
-Testing pass) is next, not yet started. See "Notes for Future
-Sessions" below for a self-correction made at the start of this phase:
-Phase 13's report incorrectly claimed no frontend tests existed
-anywhere in the repo.
+**Phase 15 — MeowVerse Cat Universe: Social Discovery & Public Cat
+Exploration: complete and verified end-to-end.** Phase 16 (a formal,
+dedicated Testing pass) is next, not yet started. A real rate-limiting
+bug was found and fixed live during this phase's own E2E testing — see
+"Real Results (Phase 15)" below.
 
 ## What Exists
 
@@ -301,6 +300,82 @@ anywhere in the repo.
     Sessions." **150/150 frontend tests passing** (was 106 at the true
     start of this phase), lint/build clean.
 
+## What Exists (Phase 15 additions)
+
+- `backend/` —
+  - `app/schemas/explore.py` — `DiscoveryCatOut` (deliberately not a
+    reused `AnalysisResult` — no owner fields to accidentally leak),
+    `ExploreCatsPage`, `FeaturedCatsResponse`, `BreedExplorerOut`,
+    `PersonalityArchetypeExplorerOut` (carries its own non-scientific
+    disclaimer), `ColorExplorerOut`, `ExploreSort`.
+  - `app/repositories/analysis_repository.py` — `list_public_analyses`
+    (SQL-paginated), `list_public_analyses_unpaginated` (the archetype/
+    color Python-filtering path's input), `get_public_breed_counts`,
+    `get_distinct_breeds_explored`/`get_distinct_colors_explored`
+    (join `collection_events` back to `cat_analyses`). No new table —
+    every function reads existing columns.
+  - `app/repositories/story_repository.py`,
+    `portrait_repository.py` — new `get_analysis_ids_with_public_stories`/
+    `get_analysis_ids_with_public_portraits`, batched (one query for
+    a whole page, not one per cat), scoped to `is_public` specifically
+    (distinct from the owner-facing versions Phase 10/14 already had).
+  - `app/services/explore_service.py` — the listing/filtering/sorting
+    orchestration, the deterministic featured-selection formula, and
+    the breed/personality/color explorer aggregation. Archetype
+    computed in-process via Phase 13's `compute_traits`/
+    `select_archetype` — zero extra queries, never a join against
+    `cat_personalities`.
+  - `app/api/v1/explore.py` — `GET /api/v1/explore/{cats,featured,
+    breeds,personalities,colors}`, all guest-accessible, all behind a
+    new, deliberately looser rate limit (see below).
+  - `app/api/v1/analyses.py` — `get_cat` now grants a `CAT_EXPLORED`
+    gamification event when a signed-in visitor opens a public cat
+    they don't own.
+  - `app/core/rate_limit.py`, `app/core/config.py` — new
+    `enforce_explore_rate_limit` (120/min, own key prefix) — see "Real
+    Results" below for why this was added mid-phase, not planned from
+    the start.
+  - `app/services/progression.py`, `achievement_definitions.py`,
+    `collection_service.py` — `CAT_EXPLORED` XP event (10, idempotent
+    per cat), four new achievements (First Explorer, Curious Whiskers,
+    Breed Seeker, Color Hunter).
+  - Migration `47eb5d38195f` — three new indexes on `cat_analyses`
+    (`is_public` + `created_at`/`rarity`/`breed_label`), no table
+    changes. Verified via a real upgrade → downgrade → upgrade cycle.
+  - Tests: `test_explore_privacy.py` (10 tests — spec §39's mandatory
+    regression suite: a private cat absent from every discovery
+    surface, similarity search, and the public cat-detail endpoint),
+    `test_explore.py` (27 tests — listing/pagination/search/filters/
+    sort/featured-determinism/explorers, plus a live query-counting
+    N+1 test), `test_explore_gamification.py` (9 tests — XP
+    idempotency, all four achievements, revisits never inflate
+    progress). **426/426 backend tests passing** (was 380), ruff clean.
+- `frontend/` —
+  - `types/explore.ts`, `services/explore.ts` — typed client for all
+    five endpoints.
+  - `features/explore/components/` — `DiscoveryCatCard` (same compact-
+    tile shape as `CollectionCard`, reusing the exact rarity visual
+    language, but built from `DiscoveryCatOut` so there's no owner
+    field to leak), `DiscoverySearch`, `DiscoveryFilters` (rarity +
+    has-story/has-portrait chips), `DiscoveryCatGrid` (loading
+    skeleton/error/empty states, "Load more"), `FeaturedCats`,
+    `DiscoveryBreedExplorer`, `DiscoveryPersonalityExplorer` (shows
+    the non-scientific disclaimer), `DiscoveryColorExplorer`,
+    `ExploreHero`.
+  - `app/explore/page.tsx` — uses `useInfiniteQuery` (not a manual
+    page/accumulated-state + `useEffect` combination, which an
+    `eslint-plugin-react-hooks` rule correctly flagged as a real
+    cascading-render anti-pattern during this phase's own build
+    verification — fixed by switching to the library's idiomatic
+    infinite-list primitive instead of suppressing the lint rule).
+  - `features/auth/components/AppNavbar.tsx` — added an "Explore" nav
+    link for both guest and signed-in users.
+  - 9 new test files, 43 tests (`DiscoveryCatCard`, `DiscoverySearch`,
+    `DiscoveryFilters`, `DiscoveryCatGrid`, `FeaturedCats`,
+    `DiscoveryBreedExplorer`, `DiscoveryPersonalityExplorer`,
+    `DiscoveryColorExplorer`, and a page-level integration test).
+    **193/193 frontend tests passing** (was 150), lint/build clean.
+
 ## Real Results (Phase 12)
 
 - **Both suites green**: 246/246 backend (pytest, real trained
@@ -550,18 +625,99 @@ script's reduced-motion step: zero console errors, confirmed twice
     — there is no live call to time. Not fabricated; reported as
     unmeasured.
 
+## Real Results (Phase 15)
+
+- **Both suites green**: 426/426 backend (was 380, including 46 new
+  discovery tests), 193/193 frontend (was 150, including 43 new
+  discovery tests). Ruff/lint/build all clean.
+- **A real bug found and fixed via live E2E, not caught by any unit
+  test**: a single `/explore` page load fires 5 parallel section
+  requests, and the general `enforce_rate_limit` (20/min, sized for
+  AI-cost-bearing endpoints) tripped false-positive `429`s during
+  completely ordinary browsing — confirmed live via a Playwright
+  browser run mid-development (a console log full of `429` errors and
+  an empty discovery grid). Fixed with a new, deliberately looser
+  `enforce_explore_rate_limit` (120/min, same `RateLimiter`
+  abstraction, own key prefix) — re-verified with a clean E2E re-run
+  afterward. Documented here per this phase's own instruction: "if you
+  discover a real bug while testing, fix it before declaring the phase
+  complete."
+- **Privacy regression suite (spec §39, mandatory) — all 10 tests
+  pass**: a private cat is confirmed absent from `/explore/cats`,
+  `/explore/featured`, every Explorer's examples, and similarity
+  search results; a stranger's similarity request against a private
+  source cat 404s; no email/user_id ever appears in any discovery
+  response.
+- **N+1 prevented and measured, not assumed**: a direct, instrumented
+  measurement (a real SQLAlchemy `before_cursor_execute` listener
+  against the live dev database) confirmed the main `/explore/cats`
+  listing fetches 24 public cats — out of 538 real, accumulated public
+  cats in this dev database — in **exactly 4 SQL queries** (count +
+  select + 2 batched public-story/public-portrait existence checks),
+  independently confirmed by a dedicated pytest query-counting test.
+  This stays flat regardless of page size or result count.
+- **Real, live browser E2E (27 steps)** against real dev servers with
+  a real Ragdoll photo and two real users: register → analyze → share
+  → logout → browse `/explore` as a guest against 538 real
+  accumulated public cats → search "Ragdoll" → filter by breed via
+  Breed Explorer → filter by personality via Personality Explorer →
+  open a public cat (both the Personality and "Cats Like This"
+  sections rendered, zero unexpected console errors) → register a
+  second user, create a private (never-shared) cat → confirmed it's
+  absent from `/explore` and that its direct public-page URL returns a
+  real `404` → verified visually at a 375px mobile viewport (screenshot
+  confirms a fully populated, cute discovery page: hero, search,
+  rarity/story/portrait chips, Featured Cats, Breed/Personality/Color
+  Explorers with real counts, a 24-of-538 "Latest Discoveries" grid,
+  and a working Load More button) → reduced motion → refresh
+  persistence. All 27 steps passed. The single console message
+  recorded during the run was an *expected* `404` — the deliberate
+  navigation to the private cat's public URL to confirm it's blocked,
+  not a real error.
+- **Performance, measured against the live dev server, not
+  estimated** (warm process, real Postgres, 538 real accumulated
+  public cats):
+  - `GET /api/v1/explore/cats` (default listing): cold 421ms, warm
+    mean 252ms over 5 requests (227–263ms).
+  - Same endpoint with a search term: mean 264ms over 3 requests.
+  - Same endpoint with a rarity filter (pure SQL path): mean 245ms
+    over 3 requests.
+  - Same endpoint with an archetype filter (the Python-side,
+    unpaginated-fetch-then-filter path): mean 315ms over 3 requests —
+    measurably higher than the pure-SQL path, as expected, but still
+    well within an interactive range at this dataset size (538 public
+    cats).
+  - `GET /api/v1/explore/featured`: mean 315ms over 3 requests.
+  - `GET /api/v1/explore/breeds`: mean 325ms over 3 requests.
+  - `GET /api/v1/explore/personalities`: mean 344ms over 3 requests.
+  - `GET /api/v1/explore/colors`: mean 355ms over 3 requests.
+  - `GET /api/v1/analyses/{id}/similar` (pre-existing Phase 11
+    endpoint, sanity-checked at this phase's larger dataset size, not
+    re-architected): cold **10.27s** (the same one-time `import torch`
+    cost on the embedding model's first touch documented since Phase
+    11 — not a Phase 15 regression), warm 567ms/747ms over 2
+    subsequent requests.
+  - Database query count for the main listing: **exactly 4**,
+    confirmed both by instrumented measurement and a dedicated test —
+    see above.
+
 ## What Does Not Exist Yet
 
-Advanced analytics, a mobile app, a social feed, chat, OAuth login, a
-formal Grad-CAM faithfulness *benchmark* (a small sanity check was
-performed and is documented above — a rigorous benchmark with a
-held-out evaluation protocol is a different, larger undertaking not
-attempted), pgvector, deleting an analysis, live-verified Anthropic
-personality generation (see above), live-verified `gpt-image-1`
-portrait generation (see above), wallpaper/avatar/sticker generation
-(a distinct, still-unbuilt feature — the Cat Card's "Generate
-Wallpaper" button remains an honest disabled placeholder). See
-ROADMAP.md Phase 15–18.
+Advanced analytics, a mobile app, comments, direct messages, a
+follower system, chat, notifications, a public "like" mechanism (spec
+§21 deliberately steered away from this — "Save to My Collection"
+already exists and is preferred), OAuth login, a formal Grad-CAM
+faithfulness *benchmark* (a small sanity check was performed and is
+documented above — a rigorous benchmark with a held-out evaluation
+protocol is a different, larger undertaking not attempted), pgvector,
+deleting an analysis, live-verified Anthropic personality generation
+(see above), live-verified `gpt-image-1` portrait generation (see
+above), wallpaper/avatar/sticker generation (a distinct, still-unbuilt
+feature — the Cat Card's "Generate Wallpaper" button remains an
+honest disabled placeholder), an "N portraits" badge on the collection
+grid card (a Phase 14 scope trim, unchanged), Open Graph social-preview
+metadata for public discovery pages (spec §23 — not implemented this
+phase; see Known Limitations). See ROADMAP.md Phases 16–19.
 
 ## Known Limitations / Honest Gaps
 
@@ -634,18 +790,50 @@ ROADMAP.md Phase 15–18.
   account the moment it's created; a redundant "Save" button with
   nothing further to do would have been decorative, not functional, so
   it was intentionally omitted.
+- **Archetype/color-filtered `/explore/cats` requests use a Python-side
+  pagination path, not pure SQL** — measured at 315ms vs. ~250ms for
+  the pure-SQL path at this dev database's current 538-public-cat
+  scale (see "Real Results" above). Fine today; would need a real
+  stored/indexed column (or a materialized view) for either field if
+  the public cat count grew into the tens of thousands. Documented as
+  a real, known tradeoff, not silently accepted.
+- **`most_discovered` sort falls back to recency when combined with an
+  archetype or color filter** — the SQL-side `CAT_EXPLORED`-count join
+  only exists on the pure-SQL listing path; adding a second batched
+  count query to the Python-side path for this one sort+filter
+  combination was judged not worth the complexity at this project's
+  scale. Documented in `explore_service._sort_key`'s own comment, not
+  silently wrong.
+- **No Open Graph / social-preview metadata was added to `/explore` or
+  the discovery-enriched public pages this phase** (spec §23) — a real
+  scope gap, not implemented. `/cat/[id]`, `/story/[id]`, and
+  `/portrait/[id]` still render fine when shared (their own existing
+  page metadata, from earlier phases, is unaffected), but a link to
+  `/explore` itself or to a specific breed/personality/color filter
+  won't carry a rich, cat-specific preview.
+- **No public "like" mechanism exists, by design** (spec §21) — "Save
+  to My Collection" (Phase 9) is the intentional substitute; a public
+  cat's popularity is instead represented honestly via the new, real
+  `most_discovered` sort (a genuine visitor count), never a fabricated
+  like/heart tally.
+- Previously noted limitations (no live Anthropic/`gpt-image-1` API
+  call tested, local dev Postgres on port 5433, the ML-less Docker
+  image, `vitest.config.ts`'s `pool: "threads"`, single global FAISS
+  index with SQL-enforced privacy) are unchanged from Phase 9–14.
 
 ## Next Steps
 
-Begin Phase 15: Testing (a formal, dedicated test-hardening pass) —
-the next un-started item in ROADMAP.md. Keep extending the existing
+Begin Phase 16: a formal, dedicated Testing pass — the next
+un-started item in ROADMAP.md. Keep extending the existing
 `vitest`/`pytest` suites for any new component/endpoint going
 forward — the gap worth avoiding is a phase skipping its own tests (as
 Phase 13 briefly did), not a missing test runner. If a real
 `ANTHROPIC_API_KEY` or `IMAGE_GENERATION_API_KEY` ever becomes
 available in this environment, a live-call smoke test for both
 providers would be a high-value, currently-missing piece of
-verification.
+verification. Open Graph metadata for `/explore` and its filtered
+views would be a reasonable, scoped follow-up before Phase 15's
+discovery feature is considered fully polished for sharing.
 
 ## Notes for Future Sessions
 
@@ -736,6 +924,51 @@ verification.
   loop at all, since the guarantee lives in Python string
   concatenation order, not in hoping the model ignores an injected
   instruction.
+- Previously noted lessons (DB-backed sessions over JWT, ownership-
+  scoped queries as the security boundary, the idempotent-event-log
+  pattern, content-hash deduplication, model versioning via a
+  cache-key unique constraint, the two-table cheap-core/expensive-extra
+  caching split, schema-shape-as-guarantee over prompt instructions,
+  shared-dev-corpus test flakiness) all still apply.
+- **A rate limit sized for one class of endpoint can quietly break a
+  different class it was never designed for** — this phase's
+  `enforce_rate_limit` (20/min) was correctly sized for AI-cost-bearing
+  endpoints (analyze, story, personality, portrait generation), but
+  reusing it unmodified for `/explore`'s read-only browsing endpoints
+  broke on the very first real Playwright run: one page load fires 5
+  parallel requests, and a couple of filter clicks exhausted the
+  budget within seconds. This was invisible in unit tests (which don't
+  exercise five simultaneous real HTTP requests the way a browser
+  does) and only surfaced via a live E2E run — a concrete reminder that
+  "reuse the existing rate limiter" (a correct instruction) doesn't
+  automatically mean "reuse the existing *threshold*." Worth checking,
+  for any future endpoint, whether its actual request pattern (how
+  many calls does one real user action generate?) matches the budget
+  it's about to inherit, not just whether a `RateLimiter` dependency
+  exists to attach.
+- **A computed-not-stored field can be a *better* filtering source than
+  a cached one, not just an acceptable shortcut** — Phase 15 filters
+  and groups public cats by Phase 13's personality archetype without
+  ever touching the `cat_personalities` table (which only has a row
+  for a cat once someone has opened its Personality card — an
+  incomplete, view-order-dependent index). Recomputing the archetype
+  in-process from already-loaded columns is both cheap (sub-millisecond,
+  confirmed in Phase 14) and *more correct* for browse-time use than
+  joining a lazily-populated cache table would have been. Worth
+  reaching for "just recompute it" before "join the cache table"
+  whenever the computation is genuinely cheap and the cache table's
+  population is incomplete or order-dependent.
+- **`useInfiniteQuery` is worth reaching for immediately, not after
+  writing a manual `page`/`accumulated` state pair** — the first draft
+  of the `/explore` page used local `useState` plus two `useEffect`s to
+  reset and accumulate pages, which `eslint-plugin-react-hooks`'
+  newer `set-state-in-effect` rule correctly flagged as a real
+  cascading-render risk. Rewriting to TanStack Query's built-in
+  infinite-list primitive (`initialPageParam`/`getNextPageParam`)
+  deleted both effects entirely and was less code, not just
+  lint-clean code — a sign the manual version was solving a problem
+  the library already solves, not a case of the lint rule being overly
+  strict.
 - Previously noted lessons (DB-backed sessions over JWT, ownership-
   scoped queries as the security boundary, the idempotent-event-log
   pattern, content-hash deduplication, model versioning via a

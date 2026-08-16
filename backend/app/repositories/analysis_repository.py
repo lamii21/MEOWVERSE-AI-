@@ -5,8 +5,11 @@ from sqlalchemy import Text, case, cast, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis import CatAnalysisModel
+from app.models.collection_event import CollectionEventModel
+from app.models.portrait import CatPortraitModel
 from app.models.story import StoryModel
 from app.schemas.analysis import AnalysisResult
+from app.schemas.explore import ExploreSort
 
 _RARITY_ORDER = ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythical"]
 _LEGENDARY_TIER_RARITIES = ("Legendary", "Mythical")
@@ -371,3 +374,208 @@ async def is_first_of_rarity(
         CatAnalysisModel.id != exclude_id,
     )
     return (await db.execute(stmt)).scalar_one() == 0
+
+
+def _public_filters(
+    *,
+    breed: str | None,
+    rarity: str | None,
+    search: str | None,
+    has_public_story: bool,
+    has_public_portrait: bool,
+) -> list:
+    """Shared WHERE-clause builder for both the SQL-paginated and the
+    Python-side (archetype/color) explore listing paths below — every
+    filter here is expressed as real SQL predicates, applied at the
+    query level (spec §28: never fetch-then-check visibility/filters
+    in Python for the parts that CAN be expressed in SQL)."""
+    filters = [CatAnalysisModel.is_public.is_(True)]
+    if breed:
+        filters.append(CatAnalysisModel.breed_label == breed)
+    if rarity:
+        filters.append(CatAnalysisModel.rarity == rarity)
+    if search:
+        pattern = f"%{search.lower()}%"
+        filters.append(
+            func.lower(CatAnalysisModel.cat_name).like(pattern)
+            | func.lower(CatAnalysisModel.breed_label).like(pattern)
+        )
+    if has_public_story:
+        filters.append(
+            exists().where(
+                StoryModel.analysis_id == CatAnalysisModel.id, StoryModel.is_public.is_(True)
+            )
+        )
+    if has_public_portrait:
+        filters.append(
+            exists().where(
+                CatPortraitModel.analysis_id == CatAnalysisModel.id,
+                CatPortraitModel.is_public.is_(True),
+                CatPortraitModel.status == "succeeded",
+            )
+        )
+    return filters
+
+
+def _apply_sort(stmt, sort: ExploreSort):
+    if sort == "newest":
+        return stmt.order_by(CatAnalysisModel.created_at.desc())
+    if sort == "oldest":
+        return stmt.order_by(CatAnalysisModel.created_at.asc())
+    if sort == "name_asc":
+        return stmt.order_by(CatAnalysisModel.cat_name.asc())
+    if sort == "name_desc":
+        return stmt.order_by(CatAnalysisModel.cat_name.desc())
+    if sort == "rarity":
+        rarity_rank = case(
+            {name: i for i, name in enumerate(_RARITY_ORDER)},
+            value=CatAnalysisModel.rarity,
+            else_=-1,
+        )
+        return stmt.order_by(rarity_rank.desc(), CatAnalysisModel.created_at.desc())
+    if sort == "most_discovered":
+        explore_counts = (
+            select(
+                CollectionEventModel.target_id.label("target_id"),
+                func.count().label("explore_count"),
+            )
+            .where(CollectionEventModel.event_type == "CAT_EXPLORED")
+            .group_by(CollectionEventModel.target_id)
+            .subquery()
+        )
+        stmt = stmt.outerjoin(
+            explore_counts, explore_counts.c.target_id == cast(CatAnalysisModel.id, Text)
+        )
+        return stmt.order_by(
+            func.coalesce(explore_counts.c.explore_count, 0).desc(),
+            CatAnalysisModel.created_at.desc(),
+        )
+    return stmt
+
+
+async def list_public_analyses(
+    db: AsyncSession,
+    *,
+    breed: str | None = None,
+    rarity: str | None = None,
+    has_public_story: bool = False,
+    has_public_portrait: bool = False,
+    search: str | None = None,
+    sort: ExploreSort = "newest",
+    page: int = 1,
+    page_size: int = 24,
+) -> tuple[list[CatAnalysisModel], int]:
+    """The SQL-paginated `/explore/cats` listing path (spec §3/§4) —
+    used whenever no archetype/color filter is requested, since every
+    filter and sort here is a real, indexed SQL predicate. See
+    `list_public_analyses_unpaginated` for the archetype/color case,
+    which isn't expressible as a stored-column predicate."""
+    filters = _public_filters(
+        breed=breed,
+        rarity=rarity,
+        search=search,
+        has_public_story=has_public_story,
+        has_public_portrait=has_public_portrait,
+    )
+
+    count_stmt = select(func.count(CatAnalysisModel.id)).where(*filters)
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    stmt = select(CatAnalysisModel).where(*filters)
+    stmt = _apply_sort(stmt, sort)
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    items = list((await db.execute(stmt)).scalars().all())
+    return items, total
+
+
+async def list_public_analyses_unpaginated(
+    db: AsyncSession,
+    *,
+    breed: str | None = None,
+    rarity: str | None = None,
+    has_public_story: bool = False,
+    has_public_portrait: bool = False,
+    search: str | None = None,
+) -> list[CatAnalysisModel]:
+    """Every SQL-filterable public cat, unpaginated — the input to the
+    archetype/color explore path (`explore_service.py`), which computes
+    the archetype (a cheap pure function, not a stored column — see
+    `personality_scoring.py`) and color-group membership in Python
+    before pagination. Still exactly one query, not N+1 — the tradeoff
+    is doing pagination in Python for this specific filter combination
+    rather than in SQL, which is honest and correct at this project's
+    real scale (a portfolio-scale public cat count, not millions of
+    rows) and documented as a known scaling limit in PROJECT_STATUS.md.
+    """
+    filters = _public_filters(
+        breed=breed,
+        rarity=rarity,
+        search=search,
+        has_public_story=has_public_story,
+        has_public_portrait=has_public_portrait,
+    )
+    stmt = select(CatAnalysisModel).where(*filters).order_by(CatAnalysisModel.created_at.desc())
+    return list((await db.execute(stmt)).scalars().all())
+
+
+async def get_public_breed_counts(db: AsyncSession) -> dict[str, int]:
+    """Real, SQL-aggregated counts of public cats per breed — powers
+    the Breed Explorer (spec §12), scoped to public cats only (spec
+    explicitly: "if counts are based only on public cats, clearly
+    define that" — this function's name says so directly)."""
+    rows = (
+        await db.execute(
+            select(CatAnalysisModel.breed_label, func.count())
+            .where(CatAnalysisModel.is_public.is_(True))
+            .group_by(CatAnalysisModel.breed_label)
+        )
+    ).all()
+    return {breed: count for breed, count in rows}
+
+
+async def get_distinct_breeds_explored(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
+    """Distinct breeds among the cats this user has *explored* (viewed
+    someone else's public cat) — powers the Breed Seeker achievement
+    (Phase 15 spec §25). Joins the real `collection_events` CAT_EXPLORED
+    log back to `cat_analyses` for the breed label; `target_id` is
+    stored as `str(uuid)` (see `app/services/gamification.py`), so the
+    join casts `id` to text rather than trying to parse `target_id`
+    back into a UUID."""
+    stmt = (
+        select(CatAnalysisModel.breed_label)
+        .join(
+            CollectionEventModel,
+            cast(CatAnalysisModel.id, Text) == CollectionEventModel.target_id,
+        )
+        .where(
+            CollectionEventModel.user_id == user_id,
+            CollectionEventModel.event_type == "CAT_EXPLORED",
+        )
+        .distinct()
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)
+
+
+async def get_distinct_colors_explored(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
+    """Distinct fur color names among explored cats — powers the Color
+    Hunter achievement. Same join as `get_distinct_breeds_explored`;
+    `colors` is JSONB, extracted in Python same as
+    `get_distinct_color_names`'s established pattern for owned cats."""
+    stmt = (
+        select(CatAnalysisModel.colors)
+        .join(
+            CollectionEventModel,
+            cast(CatAnalysisModel.id, Text) == CollectionEventModel.target_id,
+        )
+        .where(
+            CollectionEventModel.user_id == user_id,
+            CollectionEventModel.event_type == "CAT_EXPLORED",
+        )
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    names: set[str] = set()
+    for palette in rows:
+        for swatch in palette:
+            names.add(swatch["name"])
+    return names

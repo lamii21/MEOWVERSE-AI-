@@ -152,3 +152,22 @@ async def set_private(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+async def get_analysis_ids_with_public_stories(
+    db: AsyncSession, analysis_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Same batched, N+1-avoiding shape as `get_analysis_ids_with_stories`
+    above, but scoped to `is_public` stories only — used for the
+    `/explore` discovery card's "has story" indicator, which must never
+    imply a *private* story exists just because some story does (Phase
+    15 spec §5: never leak the existence of private content)."""
+    if not analysis_ids:
+        return set()
+    stmt = (
+        select(StoryModel.analysis_id)
+        .where(StoryModel.analysis_id.in_(analysis_ids), StoryModel.is_public.is_(True))
+        .distinct()
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return set(rows)

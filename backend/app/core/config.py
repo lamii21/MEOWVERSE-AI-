@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     # a text completion. See app/core/rate_limit.py.
     portrait_generation_rate_limit_per_minute: int = 5
 
+    # --- Cat Universe discovery (Phase 15) ---
+    # Deliberately looser than rate_limit_per_minute: /explore is
+    # read-only browsing with no AI cost, and a single page view issues
+    # several parallel section requests (cats/featured/breeds/
+    # personalities/colors) plus one per filter click — sharing the
+    # AI-endpoint budget was confirmed live (via Playwright E2E) to
+    # trip false-positive 429s during completely normal browsing. See
+    # app/core/rate_limit.py.
+    explore_rate_limit_per_minute: int = 120
+
     cors_origins: list[str] = ["http://localhost:3000"]
 
     max_upload_size_mb: int = 10

@@ -6,7 +6,9 @@ from app.repositories import achievement_repository, event_repository, progress_
 from app.repositories.analysis_repository import (
     get_breed_discovery_stats,
     get_discovered_breeds,
+    get_distinct_breeds_explored,
     get_distinct_color_names,
+    get_distinct_colors_explored,
     get_rarity_distribution,
     get_user_stats,
 )
@@ -37,6 +39,9 @@ async def _build_achievement_stats(db: AsyncSession, user_id: uuid.UUID) -> dict
     )
     raw["total_portraits"] = await count_user_portraits(db, user_id)
     raw["distinct_portrait_styles"] = await count_distinct_user_styles(db, user_id)
+    raw["cats_explored"] = await event_repository.count_events(db, user_id, "CAT_EXPLORED")
+    raw["distinct_breeds_explored"] = len(await get_distinct_breeds_explored(db, user_id))
+    raw["distinct_colors_explored"] = len(await get_distinct_colors_explored(db, user_id))
     return raw
 
 

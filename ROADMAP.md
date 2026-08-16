@@ -819,19 +819,99 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
      `generate_avatar` remain deliberately unimplemented placeholders on
      `ImageGenerationProvider`, not repurposed into portrait generation.
 
-## Phase 15 — Testing
+## Phase 15 — MeowVerse Cat Universe: Social Discovery & Public Cat Exploration ✅
+- ✅ `/explore` — a public discovery area (guest-accessible) built
+  entirely by composing existing systems: no new auth, no new
+  ownership model, no new storage, no new similarity engine, no new
+  gamification architecture, and **no new database table** — every
+  new query is a real, indexed SQL predicate (or, for the two fields
+  with no stored column — archetype, dominant color — a documented,
+  single-query Python-side pass) against `cat_analyses`/`stories`/
+  `cat_portraits`/`collection_events`, all scoped to `is_public = true`
+  at the repository/SQL level (spec §28 — never fetch-then-check in
+  Python).
+- ✅ `GET /api/v1/explore/cats` — offset-paginated (documented choice:
+  this codebase is offset-paginated everywhere already, at a scale
+  where cursor pagination buys nothing — spec §4), filterable
+  (breed/rarity/personality archetype/fur color/has-story/
+  has-portrait), searchable (parameterized `LIKE`, never string
+  interpolation, length-bounded), sortable (newest/oldest/rarity/
+  name/**most_discovered** — a genuinely new, real metric this phase
+  introduces, backed by actual `CAT_EXPLORED` event counts, never a
+  fabricated "most liked/shared/collected" the spec explicitly warned
+  against inventing — see §9 below).
+- ✅ `GET /api/v1/explore/featured` — a deterministic, fully documented
+  scoring formula (rarity tier + has-public-portrait + has-public-
+  story + real/demo completeness, tiebroken by recency then id) —
+  never random, the same cat never reorders between requests on an
+  unchanged dataset.
+- ✅ `GET /api/v1/explore/breeds`, `/personalities`, `/colors` — reuse
+  the Phase 10 breed catalog, Phase 13 archetypes, and Phase 5 color
+  analysis verbatim, merged with real public-cat-only counts (never
+  conflated with the owner-scoped counts Phase 10's own Breed Explorer
+  shows).
+- ✅ Personality archetype is **computed, not stored** — the exact
+  Phase 13 deterministic scoring engine (`compute_traits`/
+  `select_archetype`) run in-process against columns already loaded
+  on each row, zero extra queries — deliberately not a join against
+  `cat_personalities` (which only has rows for cats someone has
+  actually opened the Personality card for, an incomplete source for
+  browse-time filtering).
+- ✅ `CAT_EXPLORED` gamification (spec §25/§26): a real, idempotent
+  event (reusing the existing `collection_events` anti-farming
+  mechanism, no new table) granted when a signed-in visitor opens
+  someone else's public cat for the first time; four new achievements
+  (First Explorer, Curious Whiskers, Breed Seeker, Color Hunter), all
+  backed by real counts/joins, confirmed live to correctly award once
+  and never re-award on a revisit.
+- ✅ Privacy regression suite (spec §39, mandatory): a private cat is
+  confirmed absent from `/explore/cats`, `/explore/featured`, every
+  Explorer's examples, and similarity search results; a stranger's
+  similarity request against a private source cat 404s; no email/
+  user_id ever appears in any public-facing response.
+- ✅ N+1 prevented and measured, not assumed: the main listing fetches
+  24 public cats in exactly 4 SQL queries (count + select + 2 batched
+  public-story/public-portrait existence checks) — confirmed to stay
+  flat regardless of page size via both a dedicated query-counting
+  test and a live, instrumented measurement.
+- 🐛 **Found and fixed live, via Playwright E2E, not assumed**: a
+  single `/explore` page load fires 5 parallel section requests
+  (cats/featured/breeds/personalities/colors) plus one more per
+  filter/search click — sharing the general, AI-endpoint-oriented
+  `enforce_rate_limit` (20/min) tripped false-positive 429s during
+  completely ordinary browsing. Fixed with a new, deliberately looser
+  `enforce_explore_rate_limit` (120/min) — same `RateLimiter`
+  abstraction, its own key prefix, no second rate-limiter
+  implementation (spec §29 explicitly forbids one).
+- ✅ Backend: 426/426 tests (was 380) — 10 dedicated privacy regression
+  tests, 27 functional tests (pagination/search/filters/sort/featured
+  determinism/explorers), 9 gamification tests, 1 live N+1 query-count
+  test — ruff clean. Frontend: 193/193 tests (was 150), lint/build
+  clean.
+- ✅ Real, live browser E2E (27 steps) against real dev servers with a
+  real Ragdoll photo and two real users: register → analyze → share →
+  logout → browse `/explore` as a guest with 538 real accumulated
+  public cats → search → filter by breed → filter by personality →
+  open a public cat (personality + similarity sections both present,
+  zero unexpected console errors) → register a second user, create a
+  private cat, confirm it's absent from `/explore` and its direct
+  public-page URL 404s → verified visually at 375px mobile (screenshot
+  confirms a cute, fully populated discovery page) → reduced motion →
+  refresh persistence — all steps passed.
+
+## Phase 16 — Testing
 - ⬜ Backend: Pytest unit + integration + pipeline + API tests
 - ⬜ Frontend: component tests
 - ⬜ E2E: Playwright
 
-## Phase 16 — Docker & CI/CD
+## Phase 17 — Docker & CI/CD
 - ⬜ Dockerfiles (frontend, backend), full Compose stack
 - ⬜ GitHub Actions: lint, test, build gates
 
-## Phase 17 — Documentation
+## Phase 18 — Documentation
 - ⬜ Full README (features, architecture, setup, API, roadmap, etc.)
 
-## Phase 18 — Final Polish
+## Phase 19 — Final Polish
 - ⬜ Accessibility pass, responsive pass, performance pass, security pass
 
 ---
@@ -845,9 +925,10 @@ as of Phase 9: "save + revisit history" was the one outstanding piece
 (Phase 8's "Save" only bookmarked locally, with no page to browse
 those bookmarks) and Phase 9 delivered the real, authenticated version
 — an account, a persistent per-user collection, and real history.
-Similarity search, Grad-CAM, the personality engine, and the AI
-portrait studio remain explicitly post-MVP (Phases 11–14); wallpaper/
-avatar/sticker generation specifically remains not yet built.
+Similarity search, Grad-CAM, the personality engine, the AI portrait
+studio, and public discovery all remain explicitly post-MVP
+(Phases 11–15); wallpaper/avatar/sticker generation specifically
+remains not yet built.
 Collection/achievements got their
 first pass alongside Phase 9 (since the spec bundled a basic persistent
 collection into the same ask) and their full "Cat Universe" treatment

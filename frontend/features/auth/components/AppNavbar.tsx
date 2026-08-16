@@ -11,11 +11,13 @@ import { useAuth, useLogout } from "@/hooks/use-auth";
 const GUEST_LINKS = [
   { href: "/", label: "Home" },
   { href: "/discover", label: "Discover" },
+  { href: "/explore", label: "Explore" },
 ];
 
 const AUTHED_LINKS = [
   { href: "/", label: "Home" },
   { href: "/discover", label: "Discover" },
+  { href: "/explore", label: "Explore" },
   { href: "/collection", label: "My Cats" },
   { href: "/achievements", label: "Achievements" },
   { href: "/profile", label: "Profile" },

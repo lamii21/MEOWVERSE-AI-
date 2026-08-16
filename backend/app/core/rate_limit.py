@@ -89,6 +89,26 @@ async def enforce_portrait_rate_limit(request: Request) -> None:
         )
 
 
+async def enforce_explore_rate_limit(request: Request) -> None:
+    """Applied to the `/explore/*` browsing endpoints (Phase 15 spec
+    §29) — deliberately looser than `enforce_rate_limit`, its own key
+    prefix so a burst of browsing never eats into an IP's AI-endpoint
+    budget or vice versa. A single `/explore` page view fires several
+    parallel section requests plus one more per filter/search
+    interaction, none of which carry any AI cost — sharing the
+    AI-endpoint limit was confirmed, via a real Playwright E2E run, to
+    trip false-positive 429s during completely ordinary browsing.
+    """
+    settings = get_settings()
+    if not _limiter.check(
+        f"explore:{_client_id(request)}", settings.explore_rate_limit_per_minute
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests — please slow down and try again in a moment.",
+        )
+
+
 async def enforce_auth_rate_limit(request: Request) -> None:
     """Applied to register/login specifically — a tighter limit than
     the general API, since brute-forcing passwords / spamming account

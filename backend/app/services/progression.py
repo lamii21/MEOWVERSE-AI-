@@ -21,6 +21,11 @@ XP_VALUES: dict[str, int] = {
     # rewards") — between CAT_SHARED and STORY_GENERATED, since
     # generating a portrait is a real but not especially rare action.
     "PORTRAIT_GENERATED": 20,
+    # Phase 15 (spec §26): small by design, and idempotent per distinct
+    # cat (keyed by analysis_id, same anti-farming mechanism as every
+    # other event) — opening the same public cat's page again never
+    # re-grants this.
+    "CAT_EXPLORED": 10,
 }
 
 # Level N requires xp >= LEVEL_XP_STEP * (N-1)^2 — a quadratic curve,

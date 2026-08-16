@@ -1462,3 +1462,134 @@ fully distinguishable from an old, already-generated portrait, and
 prompt version naturally stops matching old rows for dedup purposes
 (the same self-resolving-staleness pattern as Phase 11's embedding
 versioning and Phase 12/13's caching).
+
+## 33. Cat Universe: Public Discovery Model (Phase 15)
+
+**No new privacy mechanism** — `/explore` reuses the exact `is_public`
+column and public-or-owned visibility rule every prior phase already
+established, applied at the SQL/repository level (spec §28 — never
+"fetch, then check `.is_public` in Python"). `analysis_repository._public_filters`
+is the one place the `WHERE is_public = true` predicate is built for
+every discovery query; nothing downstream of it ever needs to
+re-derive or double-check visibility.
+
+**No new database table.** Every new query reads `cat_analyses`,
+`stories`, `cat_portraits`, and `collection_events` — tables that
+already existed before this phase. Two response fields have no backing
+column at all and are computed instead:
+
+- **Personality archetype** — Phase 13's `compute_traits`/
+  `select_archetype` run directly against columns already loaded on
+  each row (breed, confidence, colors), zero extra queries. Not a join
+  against `cat_personalities`, which only has a row for a cat once
+  someone has actually opened its Personality card — an incomplete,
+  view-order-dependent source that would make browse-time filtering
+  silently miss cats.
+- **Dominant fur color** — the highest-percentage swatch in the
+  already-loaded `colors` JSONB column, same "no second color
+  classification system" principle as spec §14.
+
+**Pagination: offset, not cursor** (spec §4, documented choice) — this
+codebase is offset-paginated everywhere already (`list_user_analyses`,
+Phase 9), consistently, at a scale (a portfolio-project public cat
+count) where cursor pagination's real advantage — stable pagination
+under concurrent inserts at high volume — buys nothing concrete enough
+to justify a second, inconsistent pagination style. `list_public_analyses`
+mirrors `list_user_analyses`'s exact `(page, page_size)` → `(items,
+total)` shape.
+
+## 34. Cat Universe: Listing, Filtering & the Archetype/Color Split (Phase 15)
+
+Two genuinely different code paths inside `explore_service.list_explore_cats`,
+chosen by whether an archetype or color filter is present:
+
+- **No archetype/color filter** — pure SQL pagination
+  (`analysis_repository.list_public_analyses`): a `COUNT` query plus a
+  `SELECT ... OFFSET ... LIMIT` query, both filtered/sorted entirely in
+  Postgres. Scales normally.
+- **Archetype and/or color filter present** — every SQL-filterable
+  predicate (breed/rarity/story/portrait/search) still runs in SQL
+  first (`list_public_analyses_unpaginated`, no `LIMIT`), then
+  archetype (computed) and color (JSONB array membership — this
+  schema has no single indexable "dominant color" column) are applied
+  in Python, followed by Python-side sort and slicing. **Still exactly
+  one database query, not N+1** — the real, documented tradeoff is
+  doing *pagination* in Python for this one filter combination rather
+  than in SQL, which is honest and correct at this project's actual
+  scale and explicitly flagged in PROJECT_STATUS.md as a known
+  scaling limit, not silently wrong.
+
+**Search** (spec §7): `func.lower(...).like(f"%{term.lower()}%")` via
+SQLAlchemy's query builder — a parameterized query, never string
+interpolation into raw SQL. Length-capped at 100 chars by the API
+layer's `Query(max_length=100)`.
+
+**Sorting** (spec §9): `newest`/`oldest`/`rarity`/`name_asc`/
+`name_desc` are plain column sorts. `most_discovered` is the one new,
+real metric this phase introduces — an `outerjoin` against a
+per-`target_id` `COUNT(*)` subquery over `collection_events` filtered
+to `event_type = 'CAT_EXPLORED'`, ordered descending. Deliberately
+**not** "most collected"/"most shared"/"most liked" — none of those
+are metrics this schema actually persists (sharing is a boolean, not a
+count; favorites are a private per-owner flag, never a public tally),
+and spec §9 explicitly forbids inventing one just to fill out a sort
+dropdown.
+
+## 35. Cat Universe: Featured Selection & the Explorer Endpoints (Phase 15)
+
+**Featured Cats** (spec §10) — `explore_service._featured_score`, a
+fully documented, deterministic formula:
+
+```
+score = rarity_tier_index * 10
+       + (5 if has_public_portrait else 0)
+       + (3 if has_public_story else 0)
+       + (2 if breed_mode == "trained" else 0)
+       + (2 if colors_mode == "trained" else 0)
+```
+
+Ties break on `created_at` descending, then `id` ascending as a final,
+fully deterministic tiebreak — the same cat cannot reorder between two
+requests against an unchanged dataset, confirmed by a dedicated test
+that calls the endpoint twice and asserts identical ordering. Never
+`random.choice` or any per-request randomness.
+
+**Breed/Personality/Color Explorers** (spec §12-14) — each merges an
+existing canonical catalog (Phase 10's `breed_catalog`, Phase 13's
+`ARCHETYPES`, Phase 5's real analyzed swatches) with real, public-cat-
+only counts, computed via one query over all public cats (bounded by
+this project's actual scale — the same documented tradeoff as §34) —
+never a second, invented breed list, personality taxonomy, or color
+classification. `PersonalityArchetypeExplorerOut` carries the same
+non-scientific disclaimer text Phase 13 established, repeated per
+archetype rather than assumed to be understood from context.
+
+## 36. Cat Universe: Gamification & Rate Limiting (Phase 15)
+
+**`CAT_EXPLORED`** — reuses the exact `collection_events` idempotent
+insert-or-skip mechanism (Phase 10) with no new table: granted when a
+signed-in visitor's `GET /api/v1/analyses/{id}` resolves to a public
+cat they don't own (`app/api/v1/analyses.py`'s `get_cat`), keyed by
+`analysis_id`, so revisiting the same cat never re-awards XP. Four new
+achievements — First Explorer (≥1 explored), Curious Whiskers (≥10
+distinct), Breed Seeker (≥5 distinct breeds among explored cats), Color
+Hunter (≥5 distinct colors among explored cats) — all backed by real
+`collection_events` counts/joins (`get_distinct_breeds_explored`/
+`get_distinct_colors_explored` join `collection_events` back to
+`cat_analyses`, casting `id` to text since `target_id` is stored as
+`str(uuid)`), never a client-asserted count.
+
+**Rate limiting — a real bug found and fixed via live E2E, not
+assumed** (spec §29): the general `enforce_rate_limit` (20/min) is
+sized for AI-cost-bearing endpoints (analyze, story, personality,
+portrait generation). A single `/explore` page load fires five
+parallel section requests, plus one more per filter/search
+interaction — none of which touch an AI provider at all — and sharing
+that budget was confirmed, via a real Playwright browser run, to trip
+false-positive `429`s during entirely ordinary browsing. Fixed with
+`enforce_explore_rate_limit` (120/min, its own key prefix,
+`explore_rate_limit_per_minute` setting) — the exact same
+`RateLimiter` abstraction and `_limiter.check()` call every other
+endpoint uses, just a different, deliberately looser threshold. No
+second rate-limiter implementation, per spec §29's explicit
+instruction.
