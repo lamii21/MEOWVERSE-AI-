@@ -184,12 +184,16 @@ started.
     sections are: the analyze results page, the public `/cat/[id]`
     page, and the owner's `/collection/[id]` page.
   - Frontend build and lint both verified clean
-    (`npm run build`, `npm run lint`). **No new frontend unit tests
-    were written this phase** — see Known Limitations below; this
-    continues, rather than newly introduces, a gap that has existed
-    for every phase in this session (the frontend has a working
-    `vitest` config but zero test files in the repo as of the start of
-    this phase).
+    (`npm run build`, `npm run lint`). **Correction, added after this
+    entry was first written**: this phase originally, incorrectly,
+    claimed no frontend test files existed anywhere in the repo. That
+    was a research error — a real 22-file, 106-test `vitest` suite has
+    existed since the initial commit, covering CatCard, Grad-CAM,
+    auth, collection, gamification, similarity, and story components,
+    and was passing throughout Phase 12. The actual, narrower gap:
+    Phase 13 itself didn't add tests for its *own* two new components
+    (`PersonalityCard`, `TraitBar`), breaking the pattern every other
+    phase followed. Fixed retroactively — see Phase 14's entry below.
 
 ## Real Results (Phase 12)
 
@@ -305,8 +309,11 @@ script's reduced-motion step: zero console errors, confirmed twice
 ## Real Results (Phase 13)
 
 - **Both suites green**: 312/312 backend (was 246), including 66 new
-  personality tests. No new frontend automated tests this phase
-  (Known Limitations); frontend build and lint both clean.
+  personality tests. This phase originally shipped without tests for
+  its own new frontend components — backfilled in Phase 14
+  (`PersonalityCard.test.tsx`, `TraitBar.test.tsx`) against the
+  existing, already-106-test-strong `vitest` suite; frontend build and
+  lint both clean.
 - **The three-way separation was verified structurally, not just by
   convention**: a dedicated test inspects `compute_traits`'s function
   signature and confirms `rarity` is not a parameter at all; a
@@ -393,8 +400,8 @@ social feed, chat, OAuth login, a formal Grad-CAM faithfulness
 *benchmark* (a small sanity check was performed and is documented
 above — a rigorous benchmark with a held-out evaluation protocol is a
 different, larger undertaking not attempted), pgvector, deleting an
-analysis, live-verified Anthropic personality generation (see above),
-frontend automated tests for the personality feature. See ROADMAP.md
+analysis, live-verified Anthropic personality generation (see above).
+See ROADMAP.md
 Phases 14–18.
 
 ## Known Limitations / Honest Gaps
@@ -419,15 +426,14 @@ Phases 14–18.
 - **Single-process-instance limitation**, same as every other
   process-wide singleton in this codebase (breed classifier, embedding
   model, FAISS index, in-memory rate limiter).
-- **No frontend automated tests exist for the personality feature (or
-  for any feature in this codebase)** — `vitest` is configured and
-  working (`vitest.config.ts`/`vitest.setup.ts`), but zero `*.test.tsx`
-  files exist in the repo as of this phase, across every phase of this
-  session, not just Phase 13. All frontend verification this phase was
-  a real production build, real lint, and a real scripted Playwright
-  browser run rather than unit tests. This is a genuine, pre-existing
-  gap, not something Phase 13 introduced or is uniquely exempt from —
-  flagged honestly rather than silently carried forward.
+- **Corrected (previously wrong) claim**: this section originally said
+  no frontend automated tests existed anywhere in the codebase. That
+  was a research error — 22 test files / 106 passing tests already
+  existed (since the initial commit) covering many earlier phases'
+  components. The real, narrower gap this phase left behind: no tests
+  were written for Phase 13's own two new components. Backfilled in
+  Phase 14 (`PersonalityCard.test.tsx`, `TraitBar.test.tsx`, 18 tests) —
+  see Phase 14's entry.
 - **The demo-fallback interpretation is a fixed template per
   archetype, not varied per regenerate call** — with no LLM key
   configured, calling Regenerate twice on the same cat currently
@@ -448,9 +454,10 @@ Phases 14–18.
 Begin Phase 14: Creative Generation (`ImageGenerationProvider`
 interface + fallback UI, wiring up the Cat Card's existing "Generate
 Wallpaper" placeholder button) — the next un-started item in
-ROADMAP.md. Writing a first frontend test suite (nothing exists yet,
-any phase) would also be a reasonable, overdue place to invest before
-the frontend surface grows much further.
+ROADMAP.md. Keep extending the existing 22-file `vitest` suite for any
+new component going forward — the gap worth avoiding is a phase
+skipping its own tests (as Phase 13 briefly did), not a missing test
+runner.
 
 ## Notes for Future Sessions
 
