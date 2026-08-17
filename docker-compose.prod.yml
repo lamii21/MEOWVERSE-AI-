@@ -1,0 +1,85 @@
+# Production-shaped Compose file (Phase 17) — demonstrates and lets you
+# locally verify the actual deployment architecture documented in
+# README.md/PRODUCTION_CHECKLIST.md: built images (no bind-mounted
+# source, no --reload), the backend's production Dockerfile target
+# (full ML dependencies + REQUIRE_ML_MODELS=true), and the frontend's
+# `runner` stage (a real `next build` + `next start`-equivalent, not
+# `next dev`).
+#
+# This is NOT meant to be *the* production deployment (a real
+# deployment uses a managed Postgres, S3-compatible object storage, and
+# a real domain/TLS — see README.md) — it exists so "production
+# configuration" can be verified locally with `docker compose -f
+# docker-compose.prod.yml up --build` rather than only asserted.
+#
+# Secrets: copy backend/.env.production.example to backend/.env.production
+# and frontend/.env.production.example to frontend/.env.production
+# first, filling in real values — never commit either file.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: meowverse
+      POSTGRES_PASSWORD: meowverse
+      POSTGRES_DB: meowverse
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meowverse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        INSTALL_ML_DEPS: "true"
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    environment:
+      DATABASE_URL: postgresql+asyncpg://meowverse:meowverse@postgres:5432/meowverse
+      REDIS_URL: redis://redis:6379/0
+      REQUIRE_ML_MODELS: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # No bind mount, no --reload: this runs the image exactly as built —
+    # the actual test of "does the production artifact work," not the
+    # dev workflow docker-compose.yml provides.
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runner
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    restart: unless-stopped
+    env_file:
+      - ./frontend/.env.production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_prod_data:

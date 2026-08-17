@@ -1,3 +1,4 @@
+import logging
 import time
 from collections import defaultdict, deque
 from typing import Protocol
@@ -6,6 +7,7 @@ from fastapi import HTTPException, Request
 
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 _WINDOW_SECONDS = 60.0
 
 
@@ -58,14 +60,25 @@ def _client_id(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _check_or_reject(*, limiter_name: str, key: str, limit_per_minute: int, message: str) -> None:
+    if not _limiter.check(key, limit_per_minute):
+        # A client IP and which budget it exhausted — never the request
+        # body/headers — is exactly what's useful for spotting either
+        # abuse or a legitimate client that needs a higher limit,
+        # without logging anything sensitive.
+        logger.warning("Rate limit exceeded: limiter=%s key=%s", limiter_name, key)
+        raise HTTPException(status_code=429, detail=message)
+
+
 async def enforce_rate_limit(request: Request) -> None:
     """Applied to the AI-calling endpoints (analyze, story generation)."""
     settings = get_settings()
-    if not _limiter.check(_client_id(request), settings.rate_limit_per_minute):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many requests — please slow down and try again in a moment.",
-        )
+    _check_or_reject(
+        limiter_name="general",
+        key=_client_id(request),
+        limit_per_minute=settings.rate_limit_per_minute,
+        message="Too many requests — please slow down and try again in a moment.",
+    )
 
 
 async def enforce_portrait_rate_limit(request: Request) -> None:
@@ -80,13 +93,12 @@ async def enforce_portrait_rate_limit(request: Request) -> None:
     disabling").
     """
     settings = get_settings()
-    if not _limiter.check(
-        f"portrait:{_client_id(request)}", settings.portrait_generation_rate_limit_per_minute
-    ):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many portraits requested — please slow down and try again in a moment.",
-        )
+    _check_or_reject(
+        limiter_name="portrait",
+        key=f"portrait:{_client_id(request)}",
+        limit_per_minute=settings.portrait_generation_rate_limit_per_minute,
+        message="Too many portraits requested — please slow down and try again in a moment.",
+    )
 
 
 async def enforce_explore_rate_limit(request: Request) -> None:
@@ -100,13 +112,12 @@ async def enforce_explore_rate_limit(request: Request) -> None:
     trip false-positive 429s during completely ordinary browsing.
     """
     settings = get_settings()
-    if not _limiter.check(
-        f"explore:{_client_id(request)}", settings.explore_rate_limit_per_minute
-    ):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many requests — please slow down and try again in a moment.",
-        )
+    _check_or_reject(
+        limiter_name="explore",
+        key=f"explore:{_client_id(request)}",
+        limit_per_minute=settings.explore_rate_limit_per_minute,
+        message="Too many requests — please slow down and try again in a moment.",
+    )
 
 
 async def enforce_auth_rate_limit(request: Request) -> None:
@@ -118,11 +129,12 @@ async def enforce_auth_rate_limit(request: Request) -> None:
     vice versa.
     """
     settings = get_settings()
-    if not _limiter.check(f"auth:{_client_id(request)}", settings.auth_rate_limit_per_minute):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many attempts — please slow down and try again in a moment.",
-        )
+    _check_or_reject(
+        limiter_name="auth",
+        key=f"auth:{_client_id(request)}",
+        limit_per_minute=settings.auth_rate_limit_per_minute,
+        message="Too many attempts — please slow down and try again in a moment.",
+    )
 
 
 def reset_rate_limits() -> None:

@@ -97,6 +97,33 @@ def test_rejects_too_small_image(client):
     assert "too small" in response.json()["detail"]
 
 
+def test_rejects_too_large_dimensions(client):
+    buf = io.BytesIO()
+    Image.new("RGB", (8001, 100), (10, 20, 30)).save(buf, format="JPEG")
+    files = {"file": ("cat.jpg", buf.getvalue(), "image/jpeg")}
+    response = client.post("/api/v1/analyses", files=files)
+
+    assert response.status_code == 422
+    assert "too large" in response.json()["detail"]
+
+
+def test_rejects_decompression_bomb_as_a_clean_422_not_a_500(client):
+    """Phase 17 regression test for a real, discovered bug: a crafted
+    image declaring extreme dimensions (well within the upload byte-size
+    limit, since PNG compresses a solid color very well) made Pillow
+    raise its own `DecompressionBombError`, which the endpoint didn't
+    catch — it would have surfaced as an unhandled 500 instead of the
+    same honest 422 every other malformed upload gets.
+    """
+    buf = io.BytesIO()
+    Image.new("RGB", (20000, 20000), (10, 20, 30)).save(buf, format="PNG")
+    files = {"file": ("cat.png", buf.getvalue(), "image/png")}
+    response = client.post("/api/v1/analyses", files=files)
+
+    assert response.status_code == 422
+    assert "valid image" in response.json()["detail"]
+
+
 def test_rate_limit_returns_429_after_threshold(client, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "2")
     get_settings.cache_clear()

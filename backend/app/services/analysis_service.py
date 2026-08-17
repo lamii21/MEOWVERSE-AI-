@@ -18,6 +18,12 @@ from app.storage import get_image_storage
 logger = logging.getLogger(__name__)
 
 MIN_DIMENSION_PX = 64
+# A sane app-level ceiling, independent of Pillow's own decompression-bomb
+# guard (`Image.MAX_IMAGE_PIXELS`, ~178M pixels by default) — a
+# 15000x10000 image (150M pixels) would sail under that default while
+# still being an unreasonable size to decode/run CV inference on. Chosen
+# generously above any real cat photo (dataset images are ~500x500).
+MAX_DIMENSION_PX = 8000
 
 
 class InvalidImageError(ValueError):
@@ -48,12 +54,22 @@ def _load_and_validate_image(image_bytes: bytes) -> Image.Image:
         image.verify()
         # verify() leaves the file unusable for further ops; reopen.
         image = Image.open(io.BytesIO(image_bytes))
-    except (UnidentifiedImageError, OSError) as exc:
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        # Phase 17 finding: a crafted image declaring extreme dimensions
+        # (a "decompression bomb") makes Pillow raise its own
+        # `DecompressionBombError` — a real bug, not previously caught
+        # here, that would have surfaced as an unhandled 500 instead of
+        # this endpoint's normal, honest 422 for every other malformed
+        # upload.
         raise InvalidImageError("MeowVerse needs a valid image.") from exc
 
     if image.width < MIN_DIMENSION_PX or image.height < MIN_DIMENSION_PX:
         raise InvalidImageError(
             f"Image is too small — minimum {MIN_DIMENSION_PX}x{MIN_DIMENSION_PX}px."
+        )
+    if image.width > MAX_DIMENSION_PX or image.height > MAX_DIMENSION_PX:
+        raise InvalidImageError(
+            f"Image is too large — maximum {MAX_DIMENSION_PX}x{MAX_DIMENSION_PX}px."
         )
     return image
 

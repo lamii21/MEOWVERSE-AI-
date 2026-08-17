@@ -112,6 +112,90 @@ cd backend && pytest && ruff check .
 cd frontend && pnpm lint && pnpm test && pnpm build
 ```
 
+## Deployment (Phase 17)
+
+See [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) for the full
+pre-deploy walkthrough. Summary of the architecture and the choices
+behind it:
+
+```
+Frontend  → any Next.js-capable host (Vercel, or the included
+            frontend/Dockerfile's `runner` stage anywhere that runs
+            containers) — output: "standalone" for a minimal image
+Backend   → the included backend/Dockerfile (Dockerized FastAPI),
+            anywhere that runs a container + can reach Postgres
+Database  → a managed PostgreSQL instance (RDS, Neon, Supabase,
+            Railway, Fly Postgres, ...) — never the dev docker-compose
+            Postgres service
+Storage   → an S3-compatible object store (AWS S3, Cloudflare R2,
+            Backblaze B2, DigitalOcean Spaces) via IMAGE_STORAGE_PROVIDER=s3
+AI APIs   → Anthropic (LLM) / OpenAI (image generation) — both
+            optional; the app is fully functional on its demo/fallback
+            path without either
+```
+
+No specific provider is assumed or required — this is a shape, not a
+vendor lock-in. `docker-compose.prod.yml` demonstrates and lets you
+locally verify this architecture (built images, no bind-mounted
+source, the frontend's real production build) with
+`docker compose -f docker-compose.prod.yml up --build`.
+
+**Model artifact strategy.** The trained breed classifier weights
+(`backend/ml/models/breed_classifier.pt`, ~6MB) are committed directly
+to the repository — deliberately, not by oversight. At this size,
+committing the artifact is the *safest* option among the alternatives
+(object storage, a release-asset download step, a mounted volume): no
+runtime download, no extra infrastructure, no network dependency at
+container startup, and the exact weights that produced
+[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md)'s numbers are
+guaranteed to be the ones running in production. A
+`breed_classifier.pt.sha256` checksum sits alongside it;
+`REQUIRE_ML_MODELS=true` (the production default — see
+`.env.production.example`) verifies it at startup and refuses to boot
+on a mismatch or a missing file, rather than silently falling back to
+demo mode under a "real AI" product identity. `REQUIRE_ML_MODELS=false`
+(the dev/test default, unchanged since Phase 4) keeps the original
+graceful degrade-to-demo-mode behavior.
+
+**Startup behavior.** `app/core/startup_checks.py` runs once per
+process boot and distinguishes three categories explicitly: REQUIRED
+(the CORS-wildcard-in-production check, always; the ML dependency/
+weights check, only when `REQUIRE_ML_MODELS=true`), OPTIONAL (nothing
+today blocks startup on being optional and missing), and DEMO FALLBACK
+(the Anthropic/OpenAI providers — deliberately *never* startup-gated;
+the product has always been designed to run fully functionally on
+their Null-provider fallback, and that remains true in production).
+Database/Redis reachability is intentionally checked at request time
+via `GET /ready`, not blocked on at startup — the standard
+liveness/readiness split, so a transient DB hiccup during container
+boot doesn't crash-loop the process.
+
+### Database backup & recovery
+
+Not an enterprise backup platform — a documented, provider-agnostic
+minimum. Most managed Postgres providers (RDS, Neon, Supabase,
+Railway, Fly Postgres) include automated daily backups and
+point-in-time recovery out of the box; enable whatever that provider
+calls it before going live. The provider-independent fallback that
+always works:
+
+```bash
+# Backup
+pg_dump --format=custom --file=meowverse-$(date +%Y%m%d).dump "$DATABASE_URL"
+
+# Restore (into an empty database — never onto a live one)
+pg_restore --clean --if-exists --dbname="$DATABASE_URL" meowverse-YYYYMMDD.dump
+
+# Verify: row counts on a couple of key tables after restore
+psql "$DATABASE_URL" -c "SELECT count(*) FROM cat_analyses; SELECT count(*) FROM users;"
+```
+
+A restore only recovers **database** state — uploaded photos live in
+S3-compatible object storage (see `IMAGE_STORAGE_PROVIDER=s3` above),
+which has its own, separate durability guarantees from whichever
+provider you choose (S3/R2/B2 all offer object versioning if you want
+photo-level recovery too).
+
 ## Real computer vision (optional)
 
 Without any extra setup, breed and fur-color analysis run in **demo

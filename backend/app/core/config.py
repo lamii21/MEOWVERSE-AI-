@@ -91,11 +91,32 @@ class Settings(BaseSettings):
     breed_classifier_weights_path: str = "ml/models/breed_classifier.pt"
     breed_classifier_class_names_path: str = "ml/models/class_names.json"
 
-    # --- Image storage (Phase 9) ---
-    # Behind ImageStorageProvider (app/storage/) so a future S3-compatible
-    # backend is a drop-in swap — see app/storage/base.py.
+    # --- Production startup gate (Phase 17) ---
+    # False (the default, matching every prior phase's dev/test/CI
+    # behavior): missing ML weights/deps degrade to demo mode, exactly
+    # as documented throughout the product. Set true for a deployment
+    # that has committed to real CV/DL being available — startup then
+    # fails loudly (see app/core/startup_checks.py) instead of silently
+    # serving demo-mode analyses under a "real AI" product identity.
+    require_ml_models: bool = False
+
+    # --- Image storage (Phase 9 abstraction, Phase 17 S3 implementation) ---
+    # "local" (disk, dev-only — doesn't survive a redeploy/scale past one
+    # instance) or "s3" (any S3-compatible object store: AWS S3,
+    # Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO). See
+    # app/storage/base.py / app/storage/s3.py.
     image_storage_provider: str = "local"
     image_storage_dir: str = "uploads"
+    s3_bucket_name: str = ""
+    s3_region: str = "auto"
+    # None for real AWS S3; set for any S3-compatible provider (e.g.
+    # https://<account>.r2.cloudflarestorage.com for Cloudflare R2).
+    s3_endpoint_url: str | None = None
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    # A CDN/custom domain in front of the bucket, if any — falls back to
+    # the bucket's own public URL when unset. See S3ImageStorageProvider.
+    s3_public_url_base: str | None = None
 
     # --- Visual similarity (Phase 11) ---
     # Persisted FAISS index file — see app/similarity/vector_index.py.

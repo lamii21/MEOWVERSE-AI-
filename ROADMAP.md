@@ -955,25 +955,88 @@ own report. Full findings: [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md).
   both LLM/image-generation providers are honestly reported
   `NOT VERIFIED LIVE` (no API keys configured in this environment).
 
-## Phase 17 — Production Readiness
-Docker/CI-CD hardening, closing the honest gaps Phase 16 surfaced, and
-formal test-suite expansion. Not started.
-- ⬜ Backend Docker image installing `requirements-ml.txt` (known gap
-  since Phase 4 — the containerized API currently always runs in demo
-  mode for breed/color analysis)
-- ⬜ GitHub Actions gates for the full stack (lint, test, build — CI
-  scaffold exists from Phase 1, needs extending to ML/frontend build steps)
-- ⬜ S3-compatible `ImageStorageProvider` (Phase 9's interface is
-  already shaped for this swap) so uploaded photos survive a redeploy
-- ⬜ Redis-backed `RateLimiter` implementation (protocol already exists
-  from Phase 9) for multi-instance deployment
-- ⬜ Password reset / email verification flow (no email infrastructure
-  exists yet — known gap since Phase 9)
-- ⬜ A cat/non-cat detection gate (AI_VALIDATION_REPORT.md's
-  highest-value scoped follow-up) — only if this phase chooses to
-  scope it in, per Phase 16's explicit recommendation not to bolt one
-  on without a real proposal
-- ⬜ Accessibility, responsive, and general performance passes
+## Phase 17 — Production Readiness & Deployment Hardening ✅
+A hardening pass, not a feature phase — see
+[PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) for the full
+release checklist and this phase's final report for the complete
+VERIFIED/PARTIALLY VERIFIED/NOT VERIFIED breakdown.
+- ✅ **Backend Docker image now installs `requirements-ml.txt`** —
+  resolving the gap known since Phase 4. Multi-stage build
+  (`builder`/`runtime`), non-root user, HEALTHCHECK. **Verified live**:
+  a real photo uploaded to the running container returned
+  `breed_mode: "trained"`, correct breed prediction, and a real
+  Grad-CAM heatmap — the CV pipeline running for real in Docker for
+  the first time.
+- 🐛 **Three real bugs found and fixed, only by actually running the
+  built image** (not just building it): a decompression-bomb-shaped
+  upload crashing with an unhandled 500 instead of a clean 422;
+  `torch`/`torchvision` silently resolving PyPI's CUDA-bundled wheel
+  on Linux (3.41GB image, ~10min install) despite the project's own
+  documented CPU-only intent — fixed via PyTorch's CPU wheel index;
+  `opencv-python` (transitively pulled by `grad-cam`) conflicting with
+  `opencv-python-headless` on disk, leaving `cv2` importable but
+  missing real functionality (`cv2.cvtColor`) — a first fix
+  (`pip uninstall opencv-python`) made it *worse*; the real fix is a
+  forced, dependency-free reinstall of the headless build. Final image:
+  496MB (was 3.41GB).
+- ✅ **Frontend gained a real production build target** —
+  `output: "standalone"`, a `runner` Docker stage running an actual
+  `next build`, not just `next dev`. `docker-compose.prod.yml`
+  demonstrates/verifies the full production-shaped stack locally.
+- ✅ **S3-compatible `ImageStorageProvider`** (`app/storage/s3.py`) —
+  the second implementation of Phase 9's abstraction, `boto3` against
+  any S3-compatible endpoint. 12 new tests.
+- ✅ **Production startup gate** (`app/core/startup_checks.py`) —
+  REQUIRED (CORS non-wildcard in production, always; ML deps/weights
+  when `require_ml_models=true`) vs OPTIONAL (nothing today) vs DEMO
+  FALLBACK (Anthropic/OpenAI, never gated) made explicit, with a
+  SHA-256 weights integrity check. 6 new tests.
+- ✅ **Model artifact strategy decided**: the trained weights (~6MB)
+  are now committed to the repo with a checksum — simplest and safest
+  for a file this size.
+- ✅ **Security headers** (`SecurityHeadersMiddleware`) — CSP,
+  X-Content-Type-Options, Referrer-Policy, Permissions-Policy,
+  X-Frame-Options, HSTS on every response except the CDN-dependent
+  `/docs`/`/redoc`. 3 new tests.
+- 🐛 **A real image-validation bug found and fixed**: Pillow's own
+  `DecompressionBombError` wasn't caught, surfacing as an unhandled
+  500. Fixed, plus a new explicit `MAX_DIMENSION_PX` ceiling. 8 new
+  tests total covering the full image-upload attack list (empty file,
+  SVG, disguised executable, path-traversal/Unicode filenames).
+- ✅ **Auth and rate-limit logging added** — register/login/logout and
+  every 429 now log enough to diagnose abuse without ever logging a
+  password or key.
+- ✅ **CI extended**: frontend gained `pnpm typecheck` (new script) and
+  `pnpm test` (previously only lint+build); a new `docker` job builds
+  both production images on every push (previously no Docker
+  validation in CI at all).
+- ✅ **Migration safety re-verified**: a real fresh upgrade → full
+  downgrade → re-upgrade cycle against an isolated Postgres container
+  completed cleanly. All 9 existing migrations reviewed — no
+  destructive changes found, no corrective migration needed.
+- ✅ **`PRODUCTION_CHECKLIST.md`** created — environment through
+  logging, 20+ sections.
+- ✅ Full regression: **458 backend tests collected, 457 passed, 1
+  skipped** (was 429 — 29 new tests), ruff clean. **193/193 frontend
+  tests**, lint clean, typecheck clean (new), production build clean.
+- ✅ **Production-like E2E** (26-step flow) run against the actual
+  built Docker images (both backend and frontend production targets,
+  not dev servers) — completed cleanly, only architecturally-expected
+  console entries (guest 401 checks, honest 404s for an unclaimed
+  guest analysis's owner-only endpoints).
+- ⬜ Redis-backed `RateLimiter` — deliberately not built. The
+  in-memory implementation is correct for this single-instance
+  deployment; building an unused Redis-backed one would have been
+  exactly the "architecture aesthetics" the spec said not to add.
+  Documented as a known limitation, not silently dropped.
+- ⬜ Password reset / email verification flow — no email
+  infrastructure exists; out of scope for a hardening phase (feature
+  work, not deployability).
+- ⬜ A cat/non-cat detection gate — Phase 16's own recommendation was
+  not to bolt one on without a scoped proposal; still true, still not
+  built.
+- ⬜ Accessibility/responsive passes — not this phase's scope
+  (hardening ≠ new QA passes); no regression introduced either.
 
 ## Phase 18 — Final Portfolio Release
 - ⬜ Full README (features, screenshots, API reference, deployment guide)

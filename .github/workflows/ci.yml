@@ -23,6 +23,8 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
       - run: pnpm build
 
   backend:
@@ -57,3 +59,18 @@ jobs:
       - run: ruff check .
       - run: alembic upgrade head
       - run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Builds the actual production images (Phase 17) — catches
+      # Dockerfile/dependency-installation breakage that `ruff`/`pytest`
+      # running directly on the runner can't see, since those never
+      # exercise the container build at all. Doesn't run either
+      # container (that needs a real Postgres/Redis pair and secrets;
+      # see docker-compose.prod.yml for local verification of that).
+      - name: Build backend image (with ML dependencies)
+        run: docker build -t meowverse-backend:ci ./backend
+      - name: Build frontend image (production target)
+        run: docker build -t meowverse-frontend:ci --target runner ./frontend

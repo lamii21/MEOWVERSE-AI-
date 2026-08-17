@@ -29,9 +29,18 @@ backend/uploads/
 backend/data/
 
 # --- ML artifacts ---
+# The trained breed classifier weights (backend/ml/models/breed_classifier.pt,
+# ~6MB) ARE committed as of Phase 17 — see README.md's "Model artifact
+# strategy" section for why bundling this small, rarely-changing file
+# directly in the image/repo was chosen over object storage or a
+# release-asset download step. Any *other* .pt/.pth/.onnx file (e.g. a
+# personal experiment, a different architecture explored locally) stays
+# gitignored by default; commit one explicitly (`git add -f`) if it's
+# meant to replace the tracked weights.
 backend/ml/models/*.pt
 backend/ml/models/*.pth
 backend/ml/models/*.onnx
+!backend/ml/models/breed_classifier.pt
 backend/ml/dataset/raw/
 backend/ml/dataset/processed/
 mlruns/
@@ -48,3 +57,5 @@ Thumbs.db
 .env.*
 !.env.example
 !*.env.example
+!.env.production.example
+!*.env.production.example

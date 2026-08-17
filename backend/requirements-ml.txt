@@ -10,7 +10,7 @@
 torch==2.7.1
 torchvision==0.22.1
 scikit-learn==1.7.2
-opencv-python-headless==4.12.0.88  # grad-cam transitively pulls full opencv-python too (GUI libs); both share the `cv2` package, harmless but redundant
+opencv-python-headless==4.12.0.88  # grad-cam transitively pulls full opencv-python too (GUI libs) — NOT harmless: both provide the same `cv2` package and can leave it broken regardless of install order (found via a real Docker startup + upload test, Phase 17 — see backend/Dockerfile's forced headless reinstall step, which is the actual fix; a plain uninstall of opencv-python is NOT enough, it leaves cv2 importable but missing real functionality like cv2.cvtColor)
 numpy==2.2.6
 faiss-cpu==1.9.0.post1
 grad-cam==1.5.5

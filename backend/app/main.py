@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,14 +17,31 @@ from app.api.v1.similarity import router as similarity_router
 from app.api.v1.stories import router as stories_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.startup_checks import run_startup_checks
 
 settings = get_settings()
 configure_logging(settings.debug)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(
+        "Starting %s (environment=%s, require_ml_models=%s)",
+        settings.app_name,
+        settings.environment,
+        settings.require_ml_models,
+    )
+    run_startup_checks(settings)
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
     description="Every cat has a story.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -31,6 +51,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Local dev image storage (see app/storage/) served back out directly —
 # cat photos aren't secret, only the analysis data around them is

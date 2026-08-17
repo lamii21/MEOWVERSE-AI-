@@ -1,17 +1,28 @@
 # MeowVerse AI — Project Status
 
-_Last updated: 2026-08-16_
+_Last updated: 2026-08-17_
 
 ## Current Phase
 
-**Phase 16 — AI/ML Validation, Benchmarking & Final Quality Assurance:
-complete.** A validation/hardening pass, not a new feature phase — see
-[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) for the full,
-honest scorecard. Two real bugs were found and fixed this phase (fur
-color non-determinism, an unsuppressed `openai` SDK logger), plus a
-durable fix for a pre-existing, twice-recurring test-fixture pollution
-issue in the similarity test suite. Phase 17 (Production Readiness) is
-next, not yet started.
+**Phase 17 — Production Readiness & Deployment Hardening: complete.**
+A hardening pass, not a feature phase — see
+[PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) for the full
+release checklist. The backend Docker image now actually installs and
+runs the real ML pipeline (`requirements-ml.txt`) — the long-standing
+gap since Phase 4 — and the frontend gained a real production build
+target. Three real bugs were found and fixed this phase, all via
+actually building and *running* the containers rather than trusting
+`docker build` alone: a decompression-bomb image crashing the analyze
+endpoint with a 500 instead of a clean 422, `torch`/`torchvision`
+silently resolving PyPI's CUDA-bundled wheel on Linux (3.4GB image
+instead of the intended ~500MB), and `opencv-python`/
+`opencv-python-headless` conflicting on disk so `cv2` imported but
+`cv2.cvtColor` didn't exist at runtime. A new S3-compatible
+`ImageStorageProvider`, security-headers middleware, a
+REQUIRED/OPTIONAL/DEMO-FALLBACK startup gate, and auth/rate-limit
+logging were added. Phase 16 (AI/ML Validation) remains complete and
+was not redone — see [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md).
+Phase 18 (Final Portfolio Release) is next, not yet started.
 
 ## What Exists
 
@@ -442,6 +453,118 @@ evaluation tooling and two real bug fixes, not new product surface.
 - Backend: **429/429 tests passing** (was 426 — 2 new test files plus
   1 extended one), ruff clean. Frontend: unchanged this phase (no
   frontend code touched), re-confirmed still 193/193 passing.
+
+## What Exists (Phase 17 additions)
+
+- **Backend Docker image now installs real ML dependencies** —
+  `backend/Dockerfile` rewritten as a proper multi-stage build
+  (`builder` installs into a venv with `gcc`/`libpq-dev`; `runtime`
+  copies only the finished venv + app code onto a slim, non-root base).
+  `requirements-ml.txt` installs by default (`INSTALL_ML_DEPS=true`),
+  resolving the gap documented since Phase 4 where the containerized
+  API always ran breed/color/embedding/similarity/Grad-CAM in demo
+  mode. **Verified live, not just built**: a real photo uploaded to the
+  running container returned `breed_mode: "trained"`,
+  `colors_mode: "trained"`, a correct "Persian" prediction, and a real
+  Grad-CAM heatmap — the CV pipeline running for real inside Docker for
+  the first time in this project's history.
+- **Frontend gained a real production build target** —
+  `frontend/Dockerfile`'s `runner` stage runs an actual `next build`
+  (`output: "standalone"` in `next.config.ts`) instead of only ever
+  having a `dev` (hot-reload) target. `NEXT_PUBLIC_API_URL` is a
+  **build** ARG, not a runtime env var, since Next.js inlines
+  `NEXT_PUBLIC_*` values at build time — documented in
+  `.env.production.example` and `ARCHITECTURE.md` §38 after initially
+  getting this wrong in the mental model, not the code.
+- **`docker-compose.prod.yml`** — a separate, production-shaped compose
+  file (no bind mounts, no `--reload`, both real build targets) so
+  "the production build works" can actually be verified locally, not
+  just asserted. `docker-compose.yml` itself is untouched, still
+  dev-only.
+- **`S3ImageStorageProvider`** (`app/storage/s3.py`) — the second
+  implementation of Phase 9's `ImageStorageProvider` abstraction (the
+  first production one; `LocalImageStorageProvider` remains dev-only).
+  `boto3` against any S3-compatible endpoint (AWS S3, Cloudflare R2,
+  Backblaze B2, DigitalOcean Spaces). 12 new tests (roundtrip, path
+  traversal, mocked S3 save/load/failure paths).
+- **`app/core/startup_checks.py`** — a FastAPI `lifespan` hook that
+  fails fast and loud instead of silently degrading when a deployment
+  has declared something REQUIRED: CORS must not be `"*"` in
+  `environment=production` (always checked), and — only when
+  `require_ml_models=True` (the production default; `False` in
+  dev/test, unchanged behavior) — torch/torchvision/opencv/faiss/
+  scikit-learn must be importable and the breed classifier weights
+  must exist and pass a SHA-256 integrity check. The Anthropic/OpenAI
+  providers are deliberately never gated — they've always been
+  first-class-supported as optional. 6 new tests.
+- **Model artifact strategy decided and implemented**:
+  `backend/ml/models/breed_classifier.pt` (~6MB) is now committed to
+  the repository (a carved-out exception in `.gitignore`'s `*.pt`
+  rule) alongside a `.sha256` checksum file — the simplest and safest
+  option for a file this small (no runtime download, no extra
+  infrastructure, the exact weights `AI_VALIDATION_REPORT.md` measured
+  are guaranteed to be the ones deployed).
+- **`SecurityHeadersMiddleware`** (`app/core/security_headers.py`) —
+  `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`,
+  `X-Frame-Options`, `Strict-Transport-Security`, and a strict
+  default-deny `Content-Security-Policy` on every response except
+  `/docs`/`/redoc`/`/openapi.json` (excluded so FastAPI's CDN-loaded
+  Swagger UI keeps working). 3 new tests.
+- **Two real bugs found and fixed** (image handling): a crafted image
+  with extreme declared dimensions made Pillow raise its own
+  `DecompressionBombError`, uncaught, surfacing as an unhandled 500
+  instead of the same honest 422 every other malformed upload gets —
+  fixed, plus a new explicit `MAX_DIMENSION_PX` (8000px) ceiling
+  independent of Pillow's own ~178M-pixel default guard. 2 new
+  regression tests, plus 6 more covering the full §11 attack list
+  (empty file, SVG, disguised executable, path-traversal/Unicode
+  filenames — all already inert by construction, now proven with
+  tests, not just asserted).
+- **Three real bugs found and fixed via Docker** (not by inspection —
+  by actually running the built image): (1) a decompression-bomb-shaped
+  upload crashing with a 500 (above); (2) `torch==2.7.1` resolving
+  PyPI's default CUDA-bundled wheel on Linux (pulls ~10 `nvidia-cu12`
+  packages, 3.41GB image, ~10 minute install) despite
+  `requirements-ml.txt`'s own comment claiming CPU-only was already
+  chosen — that assumption held on Windows (the dev machine) but not
+  in the container; fixed by installing from PyTorch's CPU wheel index
+  explicitly first (496MB image, ~95s install); (3) `grad-cam`
+  transitively installing plain `opencv-python` (GUI build) alongside
+  the requested `opencv-python-headless`, which silently broke `cv2`
+  at runtime (`import cv2` succeeded but `cv2.cvtColor` didn't exist) —
+  a first fix attempt (`pip uninstall opencv-python`) made it *worse*,
+  since uninstalling only removes files that package owns, not files
+  it had overwritten; the real fix is a forced, dependency-free
+  reinstall of the headless build.
+- **Auth and rate-limit logging added** — `POST /auth/register`,
+  `/login`, `/logout` now log (user id + client IP, never email or
+  password) on success, and failed login attempts log the client IP
+  (useful for spotting brute-force patterns, without logging anything
+  sensitive). Every rate limiter now logs which budget was exhausted
+  and by which client on a 429 — previously silent.
+- **CI extended** (`.github/workflows/ci.yml`): frontend gained
+  `pnpm typecheck` (new `tsc --noEmit` script) and `pnpm test`,
+  previously only `lint`+`build`; a new `docker` job builds both
+  production images on every push — previously no Docker build
+  validation existed at all in CI.
+- **Migration safety re-verified, not just reviewed**: a real fresh
+  upgrade → full downgrade (`base`) → re-upgrade cycle run against an
+  isolated, throwaway Postgres container completed cleanly, all 13
+  tables present afterward. All 9 existing migrations individually
+  reviewed — no destructive changes found, every `NOT NULL` addition
+  to a pre-existing table already used `server_default` or an explicit
+  backfill-then-constrain pattern, every `downgrade()` fully reverses
+  its `upgrade()`. No corrective migration was needed.
+- **`PRODUCTION_CHECKLIST.md`** — the mandatory Phase 17 deliverable:
+  environment, database, secrets, Docker, ML dependencies, storage,
+  auth/cookies/CSRF, rate limiting, CORS/headers, backend/frontend
+  checks, CI/CD, production-like E2E, security regression, backups,
+  logging.
+- Backend: **458 tests collected, 457 passed, 1 skipped** (was 429 —
+  29 new tests across 5 new test files), ruff clean. Frontend:
+  **193/193 tests passing** (unchanged — no frontend product code
+  touched this phase, only Docker/build config), lint clean, typecheck
+  clean (newly added as an explicit step), production build clean.
 
 ## Real Results (Phase 12)
 

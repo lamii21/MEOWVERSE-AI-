@@ -6,3 +6,20 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .ruff_cache
+
+# Training data (~1.8GB) — not needed at runtime, only by
+# ml/scripts/prepare_dataset.py and ml/training/. Re-generate locally
+# if you need to retrain; never ship it in the runtime image.
+ml/dataset/raw
+ml/dataset/processed
+
+# Runtime-generated local state — dev-only (`image_storage_provider:
+# local`) or rebuilt from the DB on first use (the FAISS index).
+# Neither belongs baked into the image; both are mounted as volumes in
+# docker-compose.yml instead.
+uploads
+data
+
+htmlcov
+.coverage
+tests

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +20,12 @@ from app.services.auth_service import (
 )
 from app.services.auth_service import logout as logout_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def _to_user_out(user: UserModel) -> UserOut:
@@ -52,24 +59,28 @@ def _set_session_cookie(response: Response, token: str) -> None:
 )
 async def register(
     body: UserCreate,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> UserOut:
     try:
         user = await register_user(db, body)
     except EmailAlreadyRegisteredError as exc:
+        logger.info("Registration rejected (email already in use) from %s", _client_ip(request))
         raise HTTPException(
             status_code=409, detail="An account with that email already exists."
         ) from exc
 
     token, _ = await create_session_for_user(db, user.id)
     _set_session_cookie(response, token)
+    logger.info("User %s registered from %s", user.id, _client_ip(request))
     return _to_user_out(user)
 
 
 @router.post("/login", response_model=UserOut, dependencies=[Depends(enforce_auth_rate_limit)])
 async def login(
     body: UserLogin,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> UserOut:
@@ -78,10 +89,15 @@ async def login(
     except InvalidCredentialsError as exc:
         # Deliberately identical whether the email doesn't exist or the
         # password is wrong — see InvalidCredentialsError's docstring.
+        # The log line below is intentionally less vague than the HTTP
+        # response (useful for spotting a brute-force pattern by
+        # source IP) but never includes the attempted password.
+        logger.warning("Failed login attempt from %s", _client_ip(request))
         raise HTTPException(status_code=401, detail="Incorrect email or password.") from exc
 
     token, _ = await create_session_for_user(db, user.id)
     _set_session_cookie(response, token)
+    logger.info("User %s logged in from %s", user.id, _client_ip(request))
     return _to_user_out(user)
 
 
@@ -95,6 +111,7 @@ async def logout(
     token = request.cookies.get(settings.session_cookie_name)
     if token:
         await logout_service(db, token)
+        logger.info("Session logged out from %s", _client_ip(request))
     response.delete_cookie(key=settings.session_cookie_name, path="/")
 
 

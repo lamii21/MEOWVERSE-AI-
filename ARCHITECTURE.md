@@ -1604,3 +1604,88 @@ false-positive `429`s during entirely ordinary browsing. Fixed with
 endpoint uses, just a different, deliberately looser threshold. No
 second rate-limiter implementation, per spec §29's explicit
 instruction.
+
+## 37. Production Startup & Model Artifact Strategy (Phase 17)
+
+`app/core/startup_checks.py::run_startup_checks()` runs once, in a
+FastAPI `lifespan` context (`app/main.py`), before the app starts
+accepting traffic. It makes explicit the REQUIRED / OPTIONAL / DEMO
+FALLBACK distinction the phase asked for:
+
+- **Always REQUIRED**: `cors_origins` must not contain `"*"` when
+  `environment == "production"` — checked unconditionally, since it's a
+  security property independent of the ML pipeline.
+- **REQUIRED only when `require_ml_models=True`** (the production
+  default — see `.env.production.example`; `False` in dev/test,
+  unchanged since Phase 4): torch/torchvision/opencv/faiss/scikit-learn
+  must be importable, `breed_classifier.pt` and `class_names.json` must
+  exist, and the weights file's SHA-256 must match
+  `breed_classifier.pt.sha256` if that checksum file is present.
+  Failure raises `StartupCheckError`, which is *not* caught anywhere —
+  the process exits rather than serving demo-mode analyses under a
+  "real AI" product identity.
+- **Never gated**: the Anthropic/OpenAI providers. They have been
+  designed since Phase 6 to be fully optional — `NullLLMProvider`/
+  `NullImageGenerationProvider` are not a degraded state to warn about
+  at startup, they're a first-class, always-supported mode.
+  Database/Redis reachability is deliberately *not* checked at startup
+  either — that's `GET /ready`'s job, at request time, so a transient
+  DB hiccup during container boot doesn't crash-loop the process
+  (the standard liveness/readiness split).
+
+**Model artifact strategy**: `backend/ml/models/breed_classifier.pt`
+(~6MB) is committed to the repository (see `.gitignore`'s explicit
+`!backend/ml/models/breed_classifier.pt` exception carved out of the
+broader `*.pt` ignore rule). Considered alternatives — a
+release-asset download step, a mounted volume, object storage — all
+add a runtime dependency or a manual deploy step for a file this
+small; committing it is simultaneously the simplest and the safest
+option (no network call at container startup, the exact weights
+`AI_VALIDATION_REPORT.md` measured are guaranteed to be the ones
+running). `breed_classifier.pt.sha256` (a bare hex digest, generated
+via `hashlib.sha256`) is the integrity check `run_startup_checks`
+verifies against.
+
+## 38. Docker & Deployment Architecture (Phase 17)
+
+Both Dockerfiles are multi-stage, and both gained a real production
+target this phase (previously: the backend never installed
+`requirements-ml.txt` at all, and the frontend had no production
+target, only `dev`):
+
+- **`backend/Dockerfile`**: `builder` stage (with `gcc`/`libpq-dev`)
+  installs into a venv; `runtime` stage copies only that venv plus app
+  code onto a slim base, running as a non-root user. ML dependencies
+  install by default (`INSTALL_ML_DEPS=true` build arg) — resolving
+  the long-standing demo-mode-in-Docker gap documented since Phase 4.
+- **`frontend/Dockerfile`**: `dev` target unchanged (what
+  `docker-compose.yml` bind-mounts source over, for hot reload);
+  `builder` target runs a real `next build` against
+  `output: "standalone"` (`next.config.ts`); `runner` copies only the
+  traced `.next/standalone` + `.next/static` output onto a slim base.
+  `NEXT_PUBLIC_API_URL` is a **build** ARG, not a runtime env var —
+  Next.js inlines `NEXT_PUBLIC_*` values into the client bundle at
+  `next build` time, so setting it only at container start would bake
+  in the wrong (or a placeholder) backend URL.
+- **`docker-compose.prod.yml`**: a separate compose file (not a
+  variant of the dev one) that builds both production targets with no
+  bind mounts and no `--reload` — the only way to actually verify "the
+  production build works" locally rather than merely asserting it.
+  `docker-compose.yml` itself is untouched and remains dev-only.
+- **Image storage in production**: `S3ImageStorageProvider`
+  (`app/storage/s3.py`) implements the same `ImageStorageProvider`
+  contract `LocalImageStorageProvider` does (Phase 9's abstraction,
+  finally given its intended second implementation) — `boto3` against
+  any S3-compatible endpoint (AWS S3, Cloudflare R2, Backblaze B2,
+  DigitalOcean Spaces), selected via `IMAGE_STORAGE_PROVIDER=s3`. No
+  caller in `app/services/` changed.
+- **Security headers**: `SecurityHeadersMiddleware`
+  (`app/core/security_headers.py`) adds `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`,
+  `Strict-Transport-Security`, and a strict default-deny
+  `Content-Security-Policy` to every response — except `/docs`,
+  `/redoc`, and `/openapi.json`, which are excluded from the CSP
+  specifically because FastAPI's built-in Swagger UI loads its JS/CSS
+  from a CDN by default and a strict CSP would silently break the docs
+  page rather than protect anything (there's no user data or request
+  body on those routes).
