@@ -1,76 +1,254 @@
-# MeowVerse AI 🐱✨
+# MeowVerse 🐱✨
 
-> "Every cat has a story."
+**Not just a cat classifier — an explainable AI platform.** Upload a
+photo of a cat and MeowVerse runs it through a real, fine-tuned
+computer-vision pipeline (breed classification, fur-color analysis,
+visual embeddings, FAISS similarity search, from-scratch Grad-CAM
+explainability), a deterministic personality-scoring engine, and an
+optional generative-AI layer (structured LLM text, image-conditioned
+portrait generation) — with every output honestly labeled as **real
+model prediction**, **AI-generated creative content**, or **demo
+fallback**, never blurred together.
 
-Turn a photo of a cat into a magical, collectible Cat Card and a
-personalized short story — real computer-vision breed and fur-color
-analysis, combined with clearly labeled AI-generated creative content
-(personality, magic power, rarity, and a 5-style illustrated-in-words
-cat story), wrapped in a cinematic reveal and a shareable, downloadable
-card.
+Full-stack, end to end: Next.js frontend, FastAPI backend, PostgreSQL,
+Docker, CI/CD, and a from-scratch Grad-CAM implementation — not a
+tutorial clone, not a single Colab notebook.
 
-This README is intentionally minimal during early development. See:
+[![Backend Tests](https://img.shields.io/badge/backend%20tests-457%20passed-success)](PROJECT_STATUS.md)
+[![Frontend Tests](https://img.shields.io/badge/frontend%20tests-193%2F193-success)](PROJECT_STATUS.md)
+[![Ruff](https://img.shields.io/badge/ruff-clean-success)](backend/)
+[![Docker](https://img.shields.io/badge/docker-verified-blue)](PRODUCTION_CHECKLIST.md)
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — system design, folder structure, AI/ML pipeline
-- [ROADMAP.md](ROADMAP.md) — phased build plan and current progress
-- [PROJECT_STATUS.md](PROJECT_STATUS.md) — what's done, what's next
-- [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) — independent
-  measurement and validation of every AI/ML component: real accuracy,
-  calibration, robustness, latency, and honest limitations — no
-  fabricated metrics
+---
 
-A full README (features, screenshots, API reference, deployment guide)
-is written in Phase 18 once the product is functional end to end.
+## Table of Contents
 
-## The AI/ML techniques, honestly
+- [Highlights](#-highlights)
+- [AI Architecture](#-ai-architecture)
+- [Machine Learning](#-machine-learning)
+- [Generative AI](#-generative-ai)
+- [System Architecture](#%EF%B8%8F-system-architecture)
+- [Engineering & Security](#%EF%B8%8F-engineering--security)
+- [Testing](#-testing)
+- [Local Development](#-local-development)
+- [Production](#-production)
+- [Known Limitations](#%EF%B8%8F-known-limitations)
+- [Documentation](#-documentation)
+- [Screenshots](#-screenshots)
 
-MeowVerse combines several distinct AI/ML techniques. Every one of
-them is described throughout this README with the same rule: **never
-claim more certainty than a real measurement supports.** For the
-underlying model architecture, dataset, evaluation methodology, and
-measured numbers behind every claim below, see
-[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md).
+---
 
-| Technique | Where | What it is |
+## ✨ Highlights
+
+- 🧬 **Real breed classification** — MobileNetV3-Small fine-tuned on the Oxford-IIIT Pet dataset (12 cat breeds), 87.5% top-1 / 98.6% top-3 accuracy on a genuine held-out test set, re-evaluated and reproduced independently in [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md).
+- 🎨 **Fur color analysis** — OpenCV GrabCut foreground segmentation + K-means clustering, mapped to a named palette.
+- 🔍 **"Cats Like This"** — real 576-dim visual embeddings, exact cosine-similarity search via [FAISS](https://github.com/facebookresearch/faiss), SQL-level privacy filtering.
+- 🩻 **Grad-CAM explainability** — implemented from scratch (not a wrapper library) against the classifier's real gradients, showing *why* the model predicted a given breed.
+- 🧠 **AI-inspired personality** — 8 trait scores from a deterministic, documented rules engine (no LLM, no randomness), plus an optional LLM-written archetype narrative that structurally cannot alter the scores.
+- 📖 **AI-generated cat stories** — structured, tool-use LLM generation (Anthropic), 5 selectable styles, honest offline fallback when no API key is configured.
+- 🖼️ **AI Portrait Studio** — image-conditioned generation (OpenAI `gpt-image-1`) using the cat's *actual photo* as identity reference, 10 styles, never a stock/generic image.
+- 🌌 **Cat Universe** — a privacy-first public discovery area (search/filter/sort, deterministic "Featured Cats," breed/personality/color explorers) — not a social network; no comments, DMs, or follower system.
+- 🐳 **Production-grade engineering** — Dockerized ML pipeline (verified running real inference in-container), CI/CD, Alembic migrations, security headers, CSRF, rate limiting, S3-compatible storage abstraction.
+
+---
+
+## 🧠 AI Architecture
+
+```mermaid
+flowchart TD
+    A[📷 Uploaded Photo] --> B[Preprocessing<br/>resize · normalize · validate]
+    B --> C[Breed Classifier<br/>MobileNetV3-Small, fine-tuned]
+    B --> D[Fur Color Analyzer<br/>GrabCut + K-means]
+    B --> E[Visual Embedding<br/>576-dim, ImageNet-pretrained]
+    C --> F[Grad-CAM<br/>on-demand explanation]
+    E --> G[FAISS Similarity Search<br/>cosine similarity]
+    C --> H[Personality Engine<br/>deterministic trait scoring]
+    D --> H
+    H --> I{Generative AI<br/>optional}
+    I -->|configured| J[Anthropic LLM<br/>structured tool-use]
+    I -->|configured| K[OpenAI Image Gen<br/>image-conditioned]
+    I -->|not configured| L[Deterministic<br/>Demo Fallback]
+    J --> M[Cat Profile / Story /<br/>Personality Narrative]
+    K --> N[AI Portrait]
+    L --> M
+
+    style C fill:#c9b3f5,color:#1a1a2e
+    style D fill:#c9b3f5,color:#1a1a2e
+    style E fill:#c9b3f5,color:#1a1a2e
+    style F fill:#a3d9d3,color:#1a1a2e
+    style G fill:#a3d9d3,color:#1a1a2e
+    style H fill:#f5d6a3,color:#1a1a2e
+    style J fill:#f5a3c4,color:#1a1a2e
+    style K fill:#f5a3c4,color:#1a1a2e
+    style L fill:#d3d3d3,color:#1a1a2e
+```
+
+Every box above is real code, not a diagram of intent — see
+[docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) for the component-by-component
+breakdown of what's **trained**, what's **deterministic**, what's
+**LLM-generated**, and what's **demo fallback**.
+
+---
+
+## 🔬 Machine Learning
+
+| Component | Technique | Detail |
 |---|---|---|
-| **Computer Vision — CNN classification** | Breed prediction | MobileNetV3-Small, fine-tuned on Oxford-IIIT Pet (cat breeds only), real gradient-descent training — not a lookup table or a hard-coded rule |
-| **Explainable AI (XAI)** | "Why this breed?" | Grad-CAM computed from the real trained classifier's real gradients — a visualization of contributing regions, never presented as proof or certainty |
-| **Deep Learning — visual embeddings** | "Cats Like This" | A 576-dim feature vector from an ImageNet-pretrained CNN, capturing how a photo *looks*, independent of the breed classifier |
-| **Vector search** | "Cats Like This" | [FAISS](https://github.com/facebookresearch/faiss) exact cosine-similarity search over those embeddings, with SQL-level privacy filtering before results ever reach a response |
-| **Deterministic personalization** | Personality trait scores | A documented, non-ML rules engine over real breed/color signals — no LLM, no randomness; the same photo always produces the same 8 scores |
-| **Generative AI — text** | Stories, profile flavor text, personality interpretation | An LLM (Anthropic), used only for creative *text* — it can never see or change a trait score, a breed label, or a color value |
-| **Generative AI — image** | Portrait Studio | Image-conditioned generation (OpenAI `gpt-image-1`) using the cat's real photo as identity reference, not text-only generation |
+| **Breed classification** | Transfer learning (MobileNetV3-Small, ImageNet-pretrained, fully fine-tuned) | Trained on Oxford-IIIT Pet (CC BY-SA 4.0), 12 cat breeds, 2,371 images, 70/15/15 split, seed=42. 87.5% top-1 / 98.6% top-3 accuracy on held-out test set. |
+| **Fur color analysis** | OpenCV GrabCut (foreground segmentation) → scikit-learn K-means (k=3) → nearest-neighbor palette naming | Deterministic (RNG-seeded); an explicit *visual estimation*, not a colorimetrically calibrated measurement. |
+| **Visual embeddings** | 576-dim feature vector from an ImageNet-pretrained MobileNetV3-Small (deliberately *not* the fine-tuned breed classifier, so similarity isn't just a breed-label lookup) | L2-normalized, cosine similarity via inner product. |
+| **Similarity search** | [FAISS](https://github.com/facebookresearch/faiss) `IndexFlatIP` (exact, not approximate) | Mathematically verified with controlled vector tests (identical/orthogonal/opposite/ranked); no fabricated benchmark presented as more than it is. |
+| **Explainability** | Grad-CAM (Selvaraju et al., 2017), implemented from scratch with PyTorch forward/backward hooks against the real classifier's gradients | Target layer verified empirically (`features[-1]`, a (576,7,7) feature map), not assumed. |
+| **Personality scoring** | Deterministic rules engine, zero ML/LLM/randomness | `score = clamp(round(50 + confidence_scale × (breed_offset + color_offset + entropy_offset)), 0, 100)` over 8 traits. |
 
-Every AI output in the app is honestly labeled as one of three kinds,
-and the three are never allowed to blur together:
+Full methodology, dataset statistics, confusion-matrix analysis,
+confidence calibration, and non-cat robustness testing (including the
+honestly-reported limitation that there is **no cat/non-cat detection
+gate**) are in [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) —
+an independent validation pass with no fabricated metrics.
 
-- **REAL MODEL OUTPUT** — an actual trained model or deterministic
-  algorithm ran on your actual photo: breed prediction, fur-color
-  clusters, Grad-CAM heatmaps, visual embeddings/similarity scores,
-  and personality trait scores. These numbers change if the photo
-  changes and are reproducible.
-- **AI-GENERATED CREATIVE CONTENT** — an LLM or image model produced
-  flavor text or artwork *conditioned on* the real model output above
-  (breed, colors, archetype), clearly labeled as generated (e.g.
-  "AI-generated artwork"), and never treated as a measurement of
-  anything.
-- **DEMO FALLBACK** — no API key is configured (or a live call
-  failed), so a deterministic, hand-written placeholder is shown
-  instead and explicitly labeled `"_mode": "demo"` / "Offline demo
-  content" in the API response and UI — never silently indistinguishable
-  from a real generation.
+## 🤖 Generative AI
 
-As of the last validation pass (Phase 16), the CV/embedding/Grad-CAM/
-personality components above all run for real in this repository and
-were independently re-measured; the two generative-AI providers
-(Anthropic LLM, OpenAI image generation) are fully implemented with
-tested mock/fallback paths, but **live generation was NOT VERIFIED in
-that validation environment** because no API keys were configured
-there — see AI_VALIDATION_REPORT.md for exactly what was and wasn't
-tested, including a known limitation with no dedicated "is this even a
-cat" detection gate.
+- **Anthropic (Claude)** — used only for creative *text*: story
+  generation and personality-archetype narrative. **Forced tool use**:
+  the tool's `input_schema` is generated directly from the Pydantic
+  response schema, so the model cannot return anything but that exact
+  shape. The schema structurally has no fields for breed/color/trait
+  scores — the LLM cannot overwrite real CV signals because it has
+  nowhere to put them, not because a prompt asked nicely.
+- **OpenAI (`gpt-image-1`)** — image-conditioned portrait generation
+  using the cat's real photo as the primary identity reference, not a
+  text-only prompt. A backend-only prompt builder assembles every
+  prompt from real signals; user-supplied text is sanitized and
+  structurally confined, never able to override identity-preservation
+  rules.
+- **Deterministic fallback everywhere** — no API key configured (or a
+  live call fails) → a clearly-labeled, deterministic offline
+  placeholder is shown instead. The app is **fully functional** with
+  zero AI provider keys configured; nothing crashes, nothing is
+  silently faked.
+- **Cost control** — every AI-calling endpoint is rate-limited
+  server-side (never trusting a frontend button's `disabled` state),
+  bounded prompt sizes, one semantic retry on invalid schema (never
+  unbounded), on-demand generation with caching/deduplication (never
+  auto-regenerated).
 
-## Quick start (local development)
+**Honesty note**: live Anthropic/OpenAI calls have **NOT been
+verified** in this development environment — no API keys are
+configured here. Every provider's request-construction code, retry
+logic, and error handling is covered by mocked-provider tests (every
+failure mode: timeout, rate limit, invalid schema, missing key), and
+the honest "unavailable"/demo-fallback path is verified live. See
+[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) §14–15 for the
+exact scope of what was and wasn't tested.
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client
+        FE[Next.js Frontend<br/>App Router, TanStack Query]
+    end
+
+    subgraph Backend[FastAPI Backend]
+        API[REST API<br/>auth · analyses · explore]
+        MW[Middleware<br/>CORS · Security Headers · Rate Limit]
+        ML[ML Services<br/>Breed · Color · Embedding · Grad-CAM]
+        AI[AI Providers<br/>Anthropic · OpenAI + Null fallbacks]
+        VEC[FAISS Vector Index]
+    end
+
+    DB[(PostgreSQL<br/>users · analyses · stories ·<br/>personalities · portraits)]
+    STORE[(Image Storage<br/>Local dev / S3-compatible prod)]
+    ANTHROPIC[Anthropic API]
+    OPENAI[OpenAI API]
+
+    FE -->|HTTPS, httpOnly cookies| MW
+    MW --> API
+    API --> ML
+    API --> AI
+    ML --> VEC
+    API --> DB
+    ML --> STORE
+    AI -.optional.-> ANTHROPIC
+    AI -.optional.-> OPENAI
+
+    style FE fill:#a3d9d3,color:#1a1a2e
+    style API fill:#c9b3f5,color:#1a1a2e
+    style ML fill:#f5d6a3,color:#1a1a2e
+    style AI fill:#f5a3c4,color:#1a1a2e
+    style DB fill:#d3d3d3,color:#1a1a2e
+```
+
+More diagrams (auth flow, similarity search flow, explainability flow,
+generative-AI fallback flow) in
+[docs/ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md), and the
+full component-by-component design writeup (38 sections) in
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## 🛡️ Engineering & Security
+
+- **Authentication** — bcrypt password hashing, DB-backed *opaque*
+  session tokens (not JWT — a leaked/expired session can be revoked
+  immediately server-side; see [docs/INTERVIEW_PREPARATION.md](docs/INTERVIEW_PREPARATION.md)
+  for the full rationale), httpOnly + `SameSite=Lax` cookies.
+- **CSRF** — `SameSite=Lax` as primary defense, plus an `Origin`-header
+  check as defense-in-depth on every state-changing endpoint.
+- **CORS** — environment-driven allowlist; startup refuses to boot
+  with a wildcard origin in production.
+- **Security headers** — CSP, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`, HSTS on
+  every response.
+- **Rate limiting** — every AI-cost-bearing endpoint limited per-IP,
+  with a stricter budget for the more expensive image-generation
+  endpoint; general browsing and auth endpoints have their own
+  separately-tuned limits.
+- **Image upload security** — content-type allowlist, size limits, an
+  explicit maximum-dimension ceiling, and a fixed decompression-bomb
+  bug (Pillow's own guard wasn't being caught — found via a real Docker
+  functional test, not just code review).
+- **Privacy model** — every private resource enforced at the SQL query
+  level (never fetch-then-check in application code); a private cat is
+  invisible to search, similarity results, and discovery listings —
+  not just hidden from its direct URL.
+- **Ownership enforcement** — every mutating/regenerating endpoint is
+  owner-only; there is no "public OR owned" path for cost-bearing
+  operations like portrait generation.
+
+---
+
+## 🧪 Testing
+
+| Suite | Result |
+|---|---|
+| Backend (`pytest`) | **457 passed, 1 skipped** (458 collected) |
+| Frontend (`vitest`) | **193/193 passed** |
+| Backend lint (`ruff`) | clean |
+| Frontend lint (`eslint`) | clean |
+| Frontend types (`tsc --noEmit`) | clean |
+| Frontend production build (`next build`) | clean |
+| Docker (backend + frontend production images) | built, started, and functionally verified against real endpoints |
+| Production-like E2E (26 steps, against the built Docker images) | passed, zero unexpected console errors |
+
+What "tested" actually means here: real trained-model inference
+verified end-to-end inside a running Docker container (not just
+imported and asserted), a real Postgres migration cycle (fresh
+upgrade → full downgrade → re-upgrade) run against an isolated
+database, mathematical correctness tests for the similarity engine
+(identical/orthogonal/opposite/ranked vectors, not just HTTP-response
+assertions), and gradient-dependence tests for Grad-CAM (a different
+target class must produce a different heatmap). No test count above is
+estimated — see [PROJECT_STATUS.md](PROJECT_STATUS.md) and
+[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) for the full
+breakdown, including what was found and fixed along the way.
+
+---
+
+## 🚀 Local Development
 
 Requires Docker Desktop.
 
@@ -85,7 +263,8 @@ docker compose up --build
 - Health check: http://localhost:8000/health
 - Readiness check (DB + Redis): http://localhost:8000/ready
 
-### Running without Docker
+<details>
+<summary><strong>Running without Docker</strong></summary>
 
 **Backend**
 ```bash
@@ -102,106 +281,17 @@ pnpm install
 pnpm dev
 ```
 
-### Tests & lint
-
+**Tests & lint**
 ```bash
 # backend (needs a local Postgres — see docker-compose.yml, host port 5433)
 cd backend && pytest && ruff check .
 
 # frontend
-cd frontend && pnpm lint && pnpm test && pnpm build
+cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
-## Deployment (Phase 17)
-
-See [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) for the full
-pre-deploy walkthrough. Summary of the architecture and the choices
-behind it:
-
-```
-Frontend  → any Next.js-capable host (Vercel, or the included
-            frontend/Dockerfile's `runner` stage anywhere that runs
-            containers) — output: "standalone" for a minimal image
-Backend   → the included backend/Dockerfile (Dockerized FastAPI),
-            anywhere that runs a container + can reach Postgres
-Database  → a managed PostgreSQL instance (RDS, Neon, Supabase,
-            Railway, Fly Postgres, ...) — never the dev docker-compose
-            Postgres service
-Storage   → an S3-compatible object store (AWS S3, Cloudflare R2,
-            Backblaze B2, DigitalOcean Spaces) via IMAGE_STORAGE_PROVIDER=s3
-AI APIs   → Anthropic (LLM) / OpenAI (image generation) — both
-            optional; the app is fully functional on its demo/fallback
-            path without either
-```
-
-No specific provider is assumed or required — this is a shape, not a
-vendor lock-in. `docker-compose.prod.yml` demonstrates and lets you
-locally verify this architecture (built images, no bind-mounted
-source, the frontend's real production build) with
-`docker compose -f docker-compose.prod.yml up --build`.
-
-**Model artifact strategy.** The trained breed classifier weights
-(`backend/ml/models/breed_classifier.pt`, ~6MB) are committed directly
-to the repository — deliberately, not by oversight. At this size,
-committing the artifact is the *safest* option among the alternatives
-(object storage, a release-asset download step, a mounted volume): no
-runtime download, no extra infrastructure, no network dependency at
-container startup, and the exact weights that produced
-[AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md)'s numbers are
-guaranteed to be the ones running in production. A
-`breed_classifier.pt.sha256` checksum sits alongside it;
-`REQUIRE_ML_MODELS=true` (the production default — see
-`.env.production.example`) verifies it at startup and refuses to boot
-on a mismatch or a missing file, rather than silently falling back to
-demo mode under a "real AI" product identity. `REQUIRE_ML_MODELS=false`
-(the dev/test default, unchanged since Phase 4) keeps the original
-graceful degrade-to-demo-mode behavior.
-
-**Startup behavior.** `app/core/startup_checks.py` runs once per
-process boot and distinguishes three categories explicitly: REQUIRED
-(the CORS-wildcard-in-production check, always; the ML dependency/
-weights check, only when `REQUIRE_ML_MODELS=true`), OPTIONAL (nothing
-today blocks startup on being optional and missing), and DEMO FALLBACK
-(the Anthropic/OpenAI providers — deliberately *never* startup-gated;
-the product has always been designed to run fully functionally on
-their Null-provider fallback, and that remains true in production).
-Database/Redis reachability is intentionally checked at request time
-via `GET /ready`, not blocked on at startup — the standard
-liveness/readiness split, so a transient DB hiccup during container
-boot doesn't crash-loop the process.
-
-### Database backup & recovery
-
-Not an enterprise backup platform — a documented, provider-agnostic
-minimum. Most managed Postgres providers (RDS, Neon, Supabase,
-Railway, Fly Postgres) include automated daily backups and
-point-in-time recovery out of the box; enable whatever that provider
-calls it before going live. The provider-independent fallback that
-always works:
-
-```bash
-# Backup
-pg_dump --format=custom --file=meowverse-$(date +%Y%m%d).dump "$DATABASE_URL"
-
-# Restore (into an empty database — never onto a live one)
-pg_restore --clean --if-exists --dbname="$DATABASE_URL" meowverse-YYYYMMDD.dump
-
-# Verify: row counts on a couple of key tables after restore
-psql "$DATABASE_URL" -c "SELECT count(*) FROM cat_analyses; SELECT count(*) FROM users;"
-```
-
-A restore only recovers **database** state — uploaded photos live in
-S3-compatible object storage (see `IMAGE_STORAGE_PROVIDER=s3` above),
-which has its own, separate durability guarantees from whichever
-provider you choose (S3/R2/B2 all offer object versioning if you want
-photo-level recovery too).
-
-## Real computer vision (optional)
-
-Without any extra setup, breed and fur-color analysis run in **demo
-mode** — a clearly-labeled, deterministic placeholder (`breed_mode` /
-`colors_mode: "demo"` in the API response). To enable the real models:
-
+**Enabling real computer vision** (without it, breed/color analysis run in a
+clearly-labeled, deterministic demo mode):
 ```bash
 cd backend
 pip install -r requirements-ml.txt --extra-index-url https://download.pytorch.org/whl/cu118
@@ -210,308 +300,92 @@ python -m ml.training.train_breed_classifier # ~15-20 min on CPU
 python -m ml.evaluation.evaluate            # real accuracy/F1/confusion matrix
 ```
 
-Fur-color analysis (OpenCV + K-means) needs no training — it's real as
-soon as `requirements-ml.txt` is installed. See `backend/ml/README.md`
-and `ARCHITECTURE.md` §4 for details, and `backend/ml/models/
-model_card.json` / `backend/ml/evaluation/evaluation_report.json` for
-this repo's actual training run and metrics.
+**Enabling real generative AI** (without it, the app runs on its
+deterministic offline fallback — nothing crashes, nothing is faked):
+set `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY` in `backend/.env`, restart.
 
-## Real AI-generated profiles (optional)
+</details>
 
-Without an API key, the cat profile (name, personality, magic power,
-...) is a clearly-labeled **offline demo profile** — the app stays
-fully functional, no external call is made. To enable real generation:
+---
 
-1. Get an API key from https://console.anthropic.com/
-2. Set it in `backend/.env`:
-   ```
-   ANTHROPIC_API_KEY=sk-ant-...
-   ```
-3. Restart the backend.
+## 🐳 Production
 
-`ANTHROPIC_API_KEY` comes only from the environment (never
-hard-coded, never committed — `.env` is gitignored, only
-`.env.example` with an empty value is tracked), is never exposed to
-the frontend (only the backend calls Anthropic), and never appears in
-logs (`app/core/logging.py` keeps the `anthropic`/`httpx`/`httpcore`
-loggers at `WARNING`). See ARCHITECTURE.md §5 for the provider
-abstraction and PROJECT_STATUS.md for the full security/fallback
-design.
+```
+Frontend  → any Next.js-capable host, or the included frontend/Dockerfile's
+            `runner` stage (real `next build`, output: "standalone")
+Backend   → the included backend/Dockerfile (multi-stage, real ML deps installed)
+Database  → a managed PostgreSQL instance (never the dev docker-compose service)
+Storage   → an S3-compatible object store (AWS S3 / Cloudflare R2 / Backblaze B2 /
+            DigitalOcean Spaces) via IMAGE_STORAGE_PROVIDER=s3
+AI APIs   → Anthropic (LLM) / OpenAI (image generation) — both optional
+```
 
-## Real AI-generated stories (optional)
+`docker-compose.prod.yml` builds and runs both production images
+locally (no bind-mounted source, no hot-reload) so the actual
+deployment artifact can be verified before it ships — **verified this
+way**: a real photo uploaded to the running production backend
+container returned `breed_mode: "trained"`, a correct breed
+prediction, and a working Grad-CAM heatmap.
 
-Same setup as profiles above — no separate key needed. From an
-analyzed cat, pick one of 5 styles (Magical Adventure, Cozy &
-Wholesome, Funny & Chaotic, Dreamy & Emotional, Fantasy Quest) and
-click "Write My Cat's Story". Without `ANTHROPIC_API_KEY` configured,
-you still get a complete, clearly-labeled **offline demo story**
-(`story_mode: "demo"`) — deterministic per cat + style, and Regenerate
-still visibly cycles between a few hand-written variants even offline.
-Stories are private by default; clicking Share makes that one story
-viewable at its own `/story/[id]` link.
+See [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) for the full
+pre-deploy walkthrough (environment, secrets, migrations, storage,
+security headers, CI/CD, backups, logging) and
+[docs/CASE_STUDY.md](docs/CASE_STUDY.md) for the engineering decisions
+behind each choice.
 
-Story generation needs the analysis to have been saved to Postgres
-first (`docker compose up` includes Postgres on host port **5433** —
-not the Postgres default 5432, remapped to avoid colliding with a
-locally-installed Postgres service; see `docker-compose.yml`). If the
-database is unreachable, the rest of the analysis (breed, colors,
-profile) still works — only the story section will say so and skip
-itself.
+---
 
-## The Cat Card
+## ⚠️ Known Limitations
 
-Every analysis becomes a collectible Cat Card: a cinematic reveal
-("A new cat has appeared...") settles into a card showing the cat
-photo, name, title, breed, a labeled "Model confidence" meter (never
-framed as certainty about your cat's actual identity), a designer-style
-fur palette, personality, magic power, and a rarity badge (Common
-through Mythical — a playful game mechanic, not a scientific
-measurement, with a correspondingly restrained visual treatment per
-tier: plain → tinted → shimmer → glow → aura → particles). Hover for a
-subtle 3D tilt on desktop; tap on mobile.
+Stated plainly, not hidden:
 
-Card actions are all real, not stubs: **Save** persists it to your
-account's collection, **Favorite** and **Share** work the same way
-(Share marks it public and copies a `/cat/[id]` link, or opens your
-device's native share sheet where available), **Download PNG** exports
-the actual card as an image file, and **Story** jumps to story
-generation. **Generate Wallpaper** is still an honest placeholder —
-disabled with a "coming soon" label — a distinct, not-yet-built
-feature from the **Portrait Studio** below it, which *does* do real AI
-image generation.
+- **No cat/non-cat detection gate.** The breed classifier is a 12-way
+  softmax over cat breeds only — a non-cat photo gets a confident
+  (sometimes *very* confident) breed label instead of a "not a cat"
+  result. Found and measured during validation (a dog photo classified
+  as "Abyssinian" at 94.5% confidence); deliberately not patched with
+  a bolted-on second model without a properly scoped follow-up.
+- **Live Anthropic/OpenAI calls not verified** in this development
+  environment — no API keys are configured here. The fallback and
+  error-handling paths are fully tested; a live generation is not.
+- **In-memory rate limiter** — correct for a single instance, does not
+  share counters across multiple backend processes. A Redis-backed
+  implementation is a documented drop-in, not built (no multi-instance
+  deployment need exists yet).
+- **Real S3 credentials not exercised.** `S3ImageStorageProvider` is
+  implemented and unit-tested against a mocked client; no live bucket
+  call has been made.
+- **No password reset / email verification flow** — no email
+  infrastructure exists yet.
+- **4.4% of test-set predictions were confidently (≥80%) wrong** — a
+  real, measured calibration gap, reported rather than smoothed over.
 
-## Accounts & your cat collection
+---
 
-You can explore MeowVerse as a guest — upload a photo, get a full
-analysis and story, view the result — with no account required.
-Creating an account is only needed to keep what you find: clicking
-**Save** as a guest shows a prompt to register or log in, after which
-that cat (and everything you save from then on) belongs to your
-account.
+## 📖 Documentation
 
-- **Register** at `/register`, **log in** at `/login` — email +
-  password, hashed with `bcrypt` (never stored in plaintext, never
-  logged).
-- Sessions are **httpOnly cookies** backed by a database-stored,
-  revocable token (not a JWT) — logging out immediately invalidates
-  the session server-side. See ARCHITECTURE.md §11 for the full
-  security rationale.
-- **`/collection`** — "My Cat Universe": your full gallery, real stats
-  (total/favorites/stories/rare+/legendary+/completion%), filters
-  (rarity tiers, Favorites, Stories, Recently Discovered), debounced
-  search (name/breed/color), sort (newest/oldest/name/rarity/breed/
-  favorite), and two original views: a **MeowVerse Map** (a
-  constellation of your discovered cats, no 3D engine — plain
-  SVG/CSS/Framer Motion) and a **Breed Explorer** (every breed the
-  classifier recognizes, locked until you discover it).
-- **`/profile`** — your level, XP bar, stats, favorite cat, and
-  achievements, all computed from your real saved cats — never
-  fabricated.
-- **`/achievements`** — 15 milestones (First Paw, Cozy Collector,
-  Collector, Rare Hunter, Royal Encounter, Color Collector, Storyteller,
-  Dream Keeper, Cat Home, First Portrait, Style Collector, First
-  Explorer, Curious Whiskers, Breed Seeker, Color Hunter), each
-  unlocked by a real action, with a progress bar toward the locked
-  ones.
-- A saved cat is **private by default**; only clicking **Share**
-  makes that specific cat viewable at a public `/cat/[id]` link, and
-  only its intended public fields are ever exposed there — never your
-  email or account details.
-
-## Progression: XP, levels & achievements
-
-Discovering, favoriting, and sharing cats — and generating stories —
-earns XP, calculated and awarded **only on the backend** (the frontend
-never sends an XP value, and repeating an action, like toggling
-favorite on and off or clicking Regenerate, never pays out twice):
-
-| Action | XP |
+| Doc | What it covers |
 |---|---|
-| Discover a cat | 100 |
-| Favorite a cat (first time) | 10 |
-| Generate a story (first time per cat) | 25 |
-| Share a cat (first time) | 15 |
-| Unlock an achievement | 50 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Full system design, 38 sections, every phase's architectural decisions |
+| [AI_VALIDATION_REPORT.md](AI_VALIDATION_REPORT.md) | Independent AI/ML validation — real metrics, no fabrication |
+| [PROJECT_STATUS.md](PROJECT_STATUS.md) | What's done, real results, known gaps, phase-by-phase history |
+| [ROADMAP.md](ROADMAP.md) | The full 18-phase build plan |
+| [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Pre-deploy checklist |
+| [docs/CASE_STUDY.md](docs/CASE_STUDY.md) | Engineering case study — problem, decisions, real bugs found |
+| [docs/ML_PIPELINE.md](docs/ML_PIPELINE.md) | Component-by-component ML pipeline, trained vs. deterministic vs. generated |
+| [docs/ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) | Diagrams: system, ML pipeline, auth, similarity, explainability, generative AI |
+| [docs/INTERVIEW_PREPARATION.md](docs/INTERVIEW_PREPARATION.md) | Technical interview Q&A grounded in the real implementation |
+| [docs/PROJECT_STORY.md](docs/PROJECT_STORY.md) | How this evolved from a simple classifier idea |
 
-Levels follow a documented, easy-to-retune curve (level *N* needs
-`100 × (N-1)²` XP), capped at level 20. A "collection completion"
-percentage compares the breeds you've discovered against a fixed,
-real 12-breed universe (`ml/models/class_names.json`) — never an
-invented denominator. See ARCHITECTURE.md §15–18 for the full design,
-including how duplicate cats of the same breed are counted honestly
-(every cat counts toward your total; only genuinely new breeds move
-the completion percentage).
+---
 
-## Cats Like This — visual similarity search
+## 📸 Screenshots
 
-Every analyzed cat gets a real, computer-vision **visual embedding** —
-a 576-number fingerprint of how the photo actually looks, produced by
-an ImageNet-pretrained model (not this project's own breed classifier,
-and not a lookup by breed or color label). Cats with similar-looking
-photos land close together in that number space; "Cats Like This 🐾"
-(shown on a Cat Card, your collection, and any public `/cat/[id]`
-page) searches for the closest ones using
-[FAISS](https://github.com/facebookresearch/faiss), Meta's vector
-search library.
+_Coming soon — see [docs/SCREENSHOT_PLAN.md](docs/SCREENSHOT_PLAN.md)
+for the shot list._
 
-- Every result shows a real **"N% visually similar"** number — the
-  mathematical cosine similarity between two embeddings, never a
-  fabricated or hand-picked score. Breed and shared fur colors are
-  shown alongside each result as *context*, not as what similarity is
-  computed from.
-- Respects the same privacy model as the rest of the collection: you
-  can only ever match against public cats plus (if signed in) your own
-  — never someone else's private cat, never leaked metadata.
-- If the embedding model or search index isn't available for some
-  reason, the section says so honestly rather than showing a made-up
-  result.
-- A collapsed "How Similarity Works" note explains the four-step
-  pipeline (embed → nearby in vector space → FAISS search → closest
-  eligible cats) for anyone curious, without getting in the way of
-  everyone else. See ARCHITECTURE.md §19–22 for the full architecture,
-  the exact preprocessing/normalization, and measured performance
-  numbers.
-
-## Why MeowVerse thinks this is a... — real Grad-CAM explanations
-
-MeowVerse doesn't only predict a breed — it can show you **which
-regions of your cat's photo actually contributed most to that
-prediction**, using [Grad-CAM](https://arxiv.org/abs/1610.02391)
-("Gradient-weighted Class Activation Mapping"), implemented from
-scratch against the real trained breed classifier's real gradients —
-never a decorative heatmap, never a hard-coded region, never generated
-from the breed name alone.
-
-1. Your photo is passed through the same breed classifier that made
-   the prediction.
-2. MeowVerse computes the gradients of that specific predicted breed's
-   score, flowing back to the model's last layer that still has
-   spatial information.
-3. Those gradients become an importance weight per feature, producing
-   a heatmap of the regions that mattered most.
-4. The heatmap is colorized and blended onto your original photo — you
-   can switch between the **Original**, **AI Focus** (heatmap alone),
-   and **Overlay** views.
-
-Click **"Why this breed?"** on any analyzed cat to generate it
-on-demand (it's never computed automatically — only when you ask). The
-**prediction confidence** (a plain probability, e.g. "91%") and the
-**Grad-CAM visualization** are always shown as two separate things —
-one is never mislabeled as the other. Grad-CAM is described honestly
-throughout as *"an interpretability visualization showing regions that
-contributed strongly to the prediction"* — never as proof, certainty,
-or a causal explanation of your cat's actual breed. If the analysis
-was made in demo mode (no trained model available at the time),
-MeowVerse says so plainly instead of faking a result. See
-ARCHITECTURE.md §23–24 for the exact algorithm, target layer, and
-privacy/caching design, and PROJECT_STATUS.md for real measured
-performance and a from-real-photos qualitative review (successes and
-failures both included).
-
-## Cat Personality — an AI-inspired personality, honestly labeled
-
-MeowVerse builds a **playful, AI-inspired personality** for every
-analyzed cat — but a cat's true personality genuinely cannot be
-determined from a photo, and MeowVerse never claims otherwise. The
-feature is deliberately split into two halves that are never allowed
-to blur together:
-
-1. **8 trait scores** (curiosity, playfulness, calmness, cuddliness,
-   confidence, mischief, elegance, adventurousness), each 0-100, computed
-   by a **deterministic, documented rules engine** from the same real
-   breed and fur-color signals already produced by the classifier and
-   color analyzer — no LLM invents these numbers, no random numbers are
-   involved, and the same photo always produces the same scores.
-   Rarity and Grad-CAM data are both deliberately excluded from
-   scoring, so neither collectible tier nor "where the model looked"
-   is ever treated as behavioral evidence.
-2. A **cute archetype** (like "🌙 Dreamy Explorer" or "🎀 Cozy
-   Cuddlebug"), chosen deterministically from those 8 scores, and a
-   short piece of **creative interpretation** — a headline, catchphrase,
-   secret talent, fictional job, and fun fact — optionally written by
-   the same LLM provider used for Phase 6/7's profile and story
-   generation. The LLM can only ever produce this creative flavor text;
-   it structurally cannot see or alter the trait scores or archetype.
-   If no API key is configured or the call fails, a hand-written,
-   archetype-specific fallback is used instead and clearly labeled
-   "Offline demo content."
-
-Every score is shown as **"AI-inspired curiosity: 69"**, never as "your
-cat is 69% curious," and every Cat Personality card carries an explicit
-disclaimer: *"Personality is an AI-inspired interpretation of visual
-signals, not a scientific assessment of your cat's behavior."*
-Regenerating the creative text (owner-only) can never change the
-underlying trait scores or archetype — verified by both the caching
-design and a dedicated test. See ARCHITECTURE.md §25–28 for the scoring
-formula, archetype list, and LLM/fallback design.
-
-## Portrait Studio — personalized AI art, not a generic cat picture
-
-MeowVerse can turn your cat's real reference photo into a beautiful
-artistic portrait across 10 styles (Royal, Magical Guardian, Fantasy
-Wizard, Cosmic, Cozy Café, Storybook, Watercolor, Sticker, Anime,
-Medieval) — using your cat's **actual photo as the primary identity
-reference**, not just a text description like "a British Shorthair
-cat" (which would just generate a generic cat of that breed).
-
-- **Real image-conditioned generation.** When configured, MeowVerse
-  uses OpenAI's `gpt-image-1` image-editing model with your cat's real
-  photo attached alongside the prompt, so the result is grounded in
-  what your cat actually looks like — never a stock image, a
-  placeholder gradient, or a randomly-picked photo pretending to be
-  generated.
-- **A backend-only prompt builder**, never the frontend, assembles
-  every prompt from real signals (breed, fur colors) plus your chosen
-  style — it never invents details the photo doesn't show (no assumed
-  eye color, markings, or fur length), and any optional idea you type
-  in ("Put Luna in a moonlit library...") is sanitized and can never
-  override the identity-preservation rules.
-- **Personality and rarity may shape the *atmosphere*** (a moonlit
-  scene for a "Dreamy Explorer," a more elaborate background for a
-  rarer cat) — but never your cat's actual physical appearance.
-- Every portrait is clearly labeled **"AI-generated artwork,"** never
-  presented as a real photograph, and comes with an honest disclaimer
-  that it's an artistic interpretation, not a claim of perfect
-  likeness.
-- If no image-generation provider is configured, MeowVerse says so
-  plainly — "Portrait generation is currently unavailable" — rather
-  than faking a result. The rest of the app keeps working either way.
-- A cat can collect multiple portraits across styles, download any of
-  them as a PNG, and share one via its own public `/portrait/[id]`
-  page. See ARCHITECTURE.md §29–32 for the full provider architecture,
-  prompt design, identity-preservation strategy, and privacy model.
-
-## Cat Universe — public discovery, privacy-first
-
-`/explore` is MeowVerse's public discovery area — a small, coherent
-"Cat Universe" for browsing cats their owners have explicitly made
-public, not a general social network. There are no comments, no direct
-messages, no follower system, and no public "likes" — discovery stays
-about the cats.
-
-- **A cat appears here only if its owner explicitly shared it** — the
-  exact same public/private model every other page in MeowVerse already
-  uses, enforced at the database query level (a private cat is
-  filtered out in SQL, never fetched and then hidden after the fact).
-  Nothing about a private cat — including its existence — is ever
-  visible through search, filters, featured selection, or "visually
-  similar" results.
-- **Search, filter, and sort** by name, breed, rarity, [personality
-  archetype](#-cat-personality--an-ai-inspired-personality-honestly-labeled),
-  and fur color, plus whether a cat has a public story or AI portrait.
-  Sorting includes a genuinely new, real metric — **"Most Discovered"**
-  — the actual count of signed-in visitors who have opened that cat's
-  page; MeowVerse doesn't invent a "most liked" or "most shared" number
-  that isn't really tracked anywhere.
-- **Featured Cats** uses a documented, deterministic formula (rarity +
-  having a public portrait/story + real analysis quality) — never a
-  random pick, so the same cat won't reshuffle on every page load.
-- **Breed, Personality, and Color Explorers** reuse the exact same
-  breed catalog, personality archetypes, and color analysis the rest
-  of the app already has — never a second, parallel classification
-  system — merged with real counts of *public* cats only.
-- Opening someone else's public cat for the first time is a small, real
-  discovery moment (a little XP, and achievements like "First Explorer"
-  and "Curious Whiskers") — reusing the exact same anti-farming event
-  log every other MeowVerse achievement already uses, so revisiting the
-  same cat never re-awards anything.
+| | | |
+|---|---|---|
+| *Landing / Hero* | *Cat analysis result* | *Grad-CAM explanation* |
+| *Similar cats* | *Personality* | *AI story* |
+| *Portrait Studio* | *Collection* | *Explore* |
